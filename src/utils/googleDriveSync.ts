@@ -1,12 +1,102 @@
-import { Customer, KanbanOrder, Product, GoogleDriveConfig } from "../types";
+import { KanbanOrder, Customer, GoogleDriveConfig } from "../types";
 
-export const DEFAULT_DRIVE_CONFIG: GoogleDriveConfig = {
-  sheetWebhookUrl: "",
-  spreadsheetId: "1PapoulaFloricultura_PlanilhaPedidos_2026",
-  folderUrl: "https://drive.google.com/drive/folders/papoula-floricultura",
-  autoSync: true,
-  lastSyncedAt: new Date().toLocaleDateString("pt-BR") + " às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
-};
+/**
+ * Sends single order payload to Google Apps Script Webhook
+ */
+export async function sendOrderToGoogleSheetsWebhook(
+  webhookUrl: string,
+  orderData: {
+    orderNumber?: string;
+    productName: string;
+    price?: number | string;
+    deliveryFee?: number | string;
+    total?: number | string;
+    senderName?: string;
+    senderPhone?: string;
+    recipientName: string;
+    recipientPhone?: string;
+    city: string;
+    address: string;
+    neighborhood?: string;
+    reference?: string;
+    timeSlot?: string;
+    cardMessage?: string;
+    paymentMethod?: string;
+  }
+): Promise<boolean> {
+  if (!webhookUrl || !webhookUrl.trim() || !webhookUrl.startsWith("http")) {
+    return false;
+  }
+
+  try {
+    const cleanUrl = webhookUrl.trim();
+    // Using no-cors or standard POST. Google Apps Script Web App redirects on POST (302)
+    // Fetch with mode 'no-cors' allows browser to execute the request without CORS blockage
+    await fetch(cleanUrl, {
+      method: "POST",
+      mode: "no-cors",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(orderData),
+    });
+    return true;
+  } catch (err) {
+    console.warn("Erro ao enviar dados para o Google Sheets Webhook:", err);
+    return false;
+  }
+}
+
+/**
+ * Generates official Google Sheets template for Floricultura Papoula Orders
+ * Ready for direct upload to Google Drive
+ */
+export function downloadOfficialSpreadsheetTemplate() {
+  const headers = [
+    "Data e Hora",
+    "Numero do Pedido",
+    "Produto Escolhido",
+    "Valor do Produto (R$)",
+    "Taxa de Frete (R$)",
+    "Valor Total (R$)",
+    "Nome do Remetente",
+    "WhatsApp do Remetente",
+    "Nome do Destinatario",
+    "Telefone Destinatario",
+    "Cidade de Entrega",
+    "Endereco Completo",
+    "Bairro",
+    "Ponto de Referencia",
+    "Horario Solicitado",
+    "Mensagem do Cartao",
+    "Forma de Pagamento",
+    "Status do Pedido"
+  ];
+
+  const sampleRow = [
+    `"${new Date().toLocaleString("pt-BR")}"`,
+    `"#PAP-1001"`,
+    `"Buquê 12 Rosas Vermelhas Luxo"`,
+    `"180,00"`,
+    `"10,00"`,
+    `"190,00"`,
+    `"Carlos Eduardo"`,
+    `"(38) 99999-0000"`,
+    `"Mariana Silva"`,
+    `"(38) 98888-1111"`,
+    `"Pirapora"`,
+    `"Rua Montes Claros, 240"`,
+    `"Centro"`,
+    `"Próximo à Praça dos Cariris"`,
+    `"Hoje - O quanto antes"`,
+    `"Com todo meu amor e carinho! Feliz aniversário!"`,
+    `"PIX"`,
+    `"Pendente Confirmação PIX"`
+  ];
+
+  const content = [headers.join(","), sampleRow.join(",")].join("\n");
+  downloadCSV("Planilha_Pedidos_Floricultura_Papoula.csv", content);
+}
 
 /**
  * Generates ready-to-copy Google Sheets CSV for Orders

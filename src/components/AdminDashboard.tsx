@@ -41,7 +41,8 @@ import {
   MapPin,
   SlidersHorizontal,
   Instagram,
-  Pencil
+  Pencil,
+  Send
 } from "lucide-react";
 import { Product, Category, Customer, KanbanOrder, KanbanOrderStatus, GoogleDriveConfig, StoreConfig } from "../types";
 import { PapoulaLogo } from "./PapoulaLogo";
@@ -49,7 +50,7 @@ import { KanbanBoard } from "./KanbanBoard";
 import { GoogleDriveSettingsModal } from "./GoogleDriveSettingsModal";
 import { AICatalogExtractorModal } from "./AICatalogExtractorModal";
 import { ImageUploadInput } from "./ImageUploadInput";
-import { exportOrdersToCSV, exportCustomersToCSV, downloadCSV } from "../utils/googleDriveSync";
+import { exportOrdersToCSV, exportCustomersToCSV, downloadCSV, downloadOfficialSpreadsheetTemplate, sendOrderToGoogleSheetsWebhook } from "../utils/googleDriveSync";
 import { calculateStarRating, getStoreBusinessHours, DEFAULT_STORE_CONFIG } from "../utils/businessHours";
 
 interface AdminDashboardProps {
@@ -2309,20 +2310,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                       <div className="space-y-2 pt-2">
                         <button
-                          onClick={handleDownloadOrdersCSV}
-                          className="w-full py-2.5 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-colors"
+                          type="button"
+                          onClick={() => downloadOfficialSpreadsheetTemplate()}
+                          className="w-full py-3 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all hover:scale-[1.01]"
                         >
-                          <Download className="w-4 h-4 text-emerald-700" />
-                          <span>Baixar Pedidos ({kanbanOrders.length}) em CSV</span>
+                          <Download className="w-4 h-4 text-amber-300" />
+                          <span>📥 Baixar Modelo Oficial de Planilha (.CSV)</span>
                         </button>
 
                         <button
+                          type="button"
+                          onClick={handleDownloadOrdersCSV}
+                          className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-colors"
+                        >
+                          <Download className="w-4 h-4 text-emerald-700" />
+                          <span>Exportar Pedidos Atuais ({kanbanOrders.length})</span>
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={handleDownloadCustomersCSV}
-                          className="w-full py-2.5 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                          className="w-full py-2 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
                         >
                           <Download className="w-4 h-4 text-stone-600" />
-                          <span>Baixar Clientes & Aniversários ({customers.length})</span>
+                          <span>Exportar Clientes & Aniversários ({customers.length})</span>
                         </button>
+                      </div>
+
+                      {/* Instructions for upload */}
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-950 space-y-1.5">
+                        <strong className="block text-amber-900 font-bold">Como colocar no Google Drive:</strong>
+                        <p className="leading-tight">1. Clique no botão acima para <strong>baixar o arquivo CSV pronto</strong>.</p>
+                        <p className="leading-tight">2. Abra o <a href="https://drive.google.com" target="_blank" rel="noreferrer" className="underline font-bold text-amber-900">Google Drive</a> e arraste o arquivo para a sua pasta.</p>
+                        <p className="leading-tight">3. Clique com o botão direito no arquivo no Drive e selecione <em>"Abrir com" &rarr; "Planilhas Google"</em>.</p>
                       </div>
                     </div>
 
@@ -2405,7 +2425,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </label>
                       </div>
 
-                      <div className="flex items-center justify-end gap-3 pt-2">
+                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (!sheetWebhookUrl.trim()) {
+                              alert("Cole primeiro o link do Webhook do Google Apps Script acima.");
+                              return;
+                            }
+                            const ok = await sendOrderToGoogleSheetsWebhook(sheetWebhookUrl.trim(), {
+                              orderNumber: "#TESTE-" + Math.floor(100 + Math.random() * 900),
+                              productName: "Buquê Teste Floricultura Papoula",
+                              price: 150,
+                              deliveryFee: 10,
+                              total: 160,
+                              senderName: "Teste Automático",
+                              senderPhone: "(38) 99999-0000",
+                              recipientName: "Cliente Teste",
+                              recipientPhone: "(38) 98888-0000",
+                              city: "Pirapora",
+                              address: "Av. Salmeron, 100",
+                              neighborhood: "Centro",
+                              timeSlot: "Manhã",
+                              cardMessage: "Teste de sincronização com Google Sheets realizado com sucesso!",
+                              paymentMethod: "PIX"
+                            });
+                            showNotification(ok ? "✅ Pedido de teste enviado para a planilha! Verifique sua aba no Google Drive." : "⚠️ Verifique o link do Webhook.");
+                          }}
+                          className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2"
+                        >
+                          <Send className="w-4 h-4 text-amber-700" />
+                          <span>🚀 Enviar Pedido Teste para a Planilha Agora</span>
+                        </button>
+
                         <button
                           type="submit"
                           className="px-6 py-2.5 bg-[#114b30] hover:bg-[#0c3924] text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-2"

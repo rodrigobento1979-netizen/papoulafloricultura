@@ -15,7 +15,8 @@ import {
   ArrowLeft,
   Info
 } from "lucide-react";
-import { Product, ProductSize } from "../types";
+import { Product, ProductSize, GoogleDriveConfig } from "../types";
+import { sendOrderToGoogleSheetsWebhook } from "../utils/googleDriveSync";
 
 interface WhatsAppOrderModalProps {
   isOpen: boolean;
@@ -115,8 +116,11 @@ export const WhatsAppOrderModal: React.FC<WhatsAppOrderModalProps> = ({
 
     const fullAddress = `${deliveryAddress.trim()}${deliveryNeighborhood ? `, Bairro ${deliveryNeighborhood.trim()}` : ""}${deliveryReference ? ` (Ref: ${deliveryReference.trim()})` : ""}`;
 
+    const orderNum = `#PAP-${Math.floor(1000 + Math.random() * 9000)}`;
+
     const msg = 
 `🌸 *NOVO PEDIDO DE FLORES - FLORICULTURA PAPOULA* 🌸
+Pedido: ${orderNum}
 
 💐 *PRODUTO:* ${product.name}${sizeInfo}
 💰 *Valor do Item:* ${priceInfo}
@@ -136,6 +140,36 @@ ${recipientPhone.trim() ? `• *Telefone Destinatário:* ${recipientPhone.trim()
 
 💳 *Forma de Pagamento:* PIX
 👉 *Por favor, confirme a disponibilidade, o valor total e me envie a chave PIX para pagamento!* ✨`;
+
+    // Try sending directly to configured Google Apps Script Webhook
+    try {
+      const storedConfig = localStorage.getItem("papoula_gdrive_config");
+      if (storedConfig) {
+        const parsed: GoogleDriveConfig = JSON.parse(storedConfig);
+        if (parsed.sheetWebhookUrl && parsed.autoSync) {
+          sendOrderToGoogleSheetsWebhook(parsed.sheetWebhookUrl, {
+            orderNumber: orderNum,
+            productName: `${product.name}${sizeInfo}`,
+            price: currentPrice,
+            deliveryFee: deliveryFee,
+            total: currentPrice + deliveryFee,
+            senderName: senderType === "anonymous" ? "Envio Anônimo" : (senderName.trim() || "Anônimo"),
+            senderPhone: senderPhone.trim(),
+            recipientName: recipientName.trim(),
+            recipientPhone: recipientPhone.trim(),
+            city: deliveryCity,
+            address: deliveryAddress.trim(),
+            neighborhood: deliveryNeighborhood.trim(),
+            reference: deliveryReference.trim(),
+            timeSlot: deliveryTimeSlot,
+            cardMessage: cardMessage.trim(),
+            paymentMethod: "PIX"
+          });
+        }
+      }
+    } catch (e) {
+      console.warn("Could not sync with Google Sheets:", e);
+    }
 
     const waUrl = `https://wa.me/5538988512855?text=${encodeURIComponent(msg)}`;
     window.open(waUrl, "_blank");

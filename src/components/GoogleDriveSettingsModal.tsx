@@ -15,7 +15,7 @@ import {
   FolderOpen
 } from "lucide-react";
 import { GoogleDriveConfig, KanbanOrder, Customer } from "../types";
-import { exportOrdersToCSV, exportCustomersToCSV, downloadCSV } from "../utils/googleDriveSync";
+import { exportOrdersToCSV, exportCustomersToCSV, downloadCSV, downloadOfficialSpreadsheetTemplate } from "../utils/googleDriveSync";
 
 interface GoogleDriveSettingsModalProps {
   isOpen: boolean;
@@ -145,11 +145,35 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
         </div>
 
         {/* Quick Export Actions */}
-        <div className="space-y-2">
-          <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider">
-            Exportação Rápida para Google Sheets / Excel (.CSV)
-          </label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between">
+            <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider">
+              Download da Planilha Pronta para o Google Drive
+            </label>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => downloadOfficialSpreadsheetTemplate()}
+            className="w-full p-3.5 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-2xl flex items-center justify-between shadow-md transition-all cursor-pointer group hover:scale-[1.01]"
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-amber-300 group-hover:scale-105 transition-transform">
+                <FileSpreadsheet className="w-6 h-6" />
+              </div>
+              <div className="text-left">
+                <span className="font-bold text-xs sm:text-sm block">
+                  📥 Baixar Planilha Oficial de Pedidos (.CSV)
+                </span>
+                <span className="text-[11px] text-emerald-100/90 block">
+                  Com todas as colunas já formatadas para arrastar para o seu Google Drive
+                </span>
+              </div>
+            </div>
+            <Download className="w-5 h-5 text-amber-300" />
+          </button>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
             <button
               onClick={handleDownloadOrders}
               className="p-3 bg-stone-50 hover:bg-emerald-50 border border-stone-200 hover:border-emerald-300 rounded-2xl flex items-center gap-3 transition-all cursor-pointer text-left group"
@@ -159,10 +183,10 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
               </div>
               <div className="flex-1 min-w-0">
                 <span className="font-bold text-xs text-stone-900 block truncate">
-                  Baixar Planilha de Pedidos ({orders.length})
+                  Exportar Pedidos Atuais ({orders.length})
                 </span>
                 <span className="text-[11px] text-stone-500 block truncate">
-                  Endereços, cartões, valores e status
+                  Endereços, cartões e status
                 </span>
               </div>
               <Download className="w-4 h-4 text-emerald-700 shrink-0" />
@@ -177,10 +201,10 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
               </div>
               <div className="flex-1 min-w-0">
                 <span className="font-bold text-xs text-stone-900 block truncate">
-                  Baixar Lista VIP & Aniversários ({customers.length})
+                  Exportar Clientes & Aniversários ({customers.length})
                 </span>
                 <span className="text-[11px] text-stone-500 block truncate">
-                  Clientes, WhatsApp e datas especiais
+                  WhatsApp e datas especiais
                 </span>
               </div>
               <Download className="w-4 h-4 text-amber-700 shrink-0" />
