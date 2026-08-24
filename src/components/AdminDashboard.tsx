@@ -33,6 +33,8 @@ import {
   MessageCircle,
   FileSpreadsheet,
   Download,
+  Upload,
+  RefreshCw,
   ExternalLink,
   ShieldCheck,
   Check,
@@ -50,7 +52,20 @@ import { OrdersList } from "./OrdersList";
 import { GoogleDriveSettingsModal } from "./GoogleDriveSettingsModal";
 import { AICatalogExtractorModal } from "./AICatalogExtractorModal";
 import { ImageUploadInput } from "./ImageUploadInput";
-import { exportOrdersToCSV, exportCustomersToCSV, downloadCSV, downloadOfficialSpreadsheetTemplate, sendOrderToGoogleSheetsWebhook } from "../utils/googleDriveSync";
+import { 
+  exportOrdersToCSV, 
+  exportCustomersToCSV, 
+  exportCatalogToCSV, 
+  exportCategoriesToCSV, 
+  downloadCSV, 
+  downloadOfficialSpreadsheetTemplate, 
+  sendOrderToGoogleSheetsWebhook,
+  syncCatalogToGoogleSheets,
+  syncCategoriesToGoogleSheets,
+  syncAllToGoogleSheets,
+  parseCatalogFromCSV,
+  parseCategoriesFromCSV
+} from "../utils/googleDriveSync";
 import { calculateStarRating, getStoreBusinessHours, DEFAULT_STORE_CONFIG } from "../utils/businessHours";
 import { buildWhatsAppUrl } from "../utils/whatsapp";
 
@@ -243,6 +258,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [folderUrl, setFolderUrl] = useState(googleDriveConfig.folderUrl || "");
   const [autoSync, setAutoSync] = useState(googleDriveConfig.autoSync);
 
+  // Requirement: Apenas a Última Atualização do Catálogo (cadastro, preço ou foto)
+  const [lastUpdate, setLastUpdate] = useState<{
+    type: "product" | "price" | "image";
+    label: string;
+    productName: string;
+    detail?: string;
+    date: string;
+  }>(() => {
+    try {
+      const saved = localStorage.getItem("papoula_last_single_update");
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+
+    const lastProd = products[products.length - 1] || products[0];
+    const nowFormatted = new Date().toLocaleDateString("pt-BR") + " às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+
+    return {
+      type: "product",
+      label: "Cadastro de Produto",
+      productName: lastProd ? lastProd.name : "Catálogo Inicial",
+      detail: lastProd?.price ? `R$ ${lastProd.price.toFixed(2)}` : undefined,
+      date: nowFormatted,
+    };
+  });
+
+  const recordLatestUpdate = (info: {
+    type: "product" | "price" | "image";
+    label: string;
+    productName: string;
+    detail?: string;
+    date: string;
+  }) => {
+    setLastUpdate(info);
+    try {
+      localStorage.setItem("papoula_last_single_update", JSON.stringify(info));
+    } catch (e) {}
+  };
+
   const showNotification = (msg: string) => {
     setFeedbackMessage(msg);
     setTimeout(() => setFeedbackMessage(""), 4000);
@@ -364,6 +417,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     onAddProduct(newProd);
+    
+    // Requirement: Registrar apenas a última atualização de cadastro
+    const nowTime = new Date().toLocaleDateString("pt-BR") + " às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    recordLatestUpdate({
+      type: "product",
+      label: "Cadastro de Produto",
+      productName: newProd.name,
+      detail: newProd.price && newProd.price > 0 ? `R$ ${newProd.price.toFixed(2)}` : "Cadastrado",
+      date: nowTime,
+    });
+
     setProductName("");
     setPrice("");
     setReferencePrice("");
@@ -378,6 +442,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!isNaN(num) && num > 0) {
       onUpdateProduct({ ...prod, price: num, isPriceOnDemand: false });
       setEditingPriceId(null);
+
+      // Requirement: Registrar apenas a última atualização de preço
+      const nowTime = new Date().toLocaleDateString("pt-BR") + " às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+      recordLatestUpdate({
+        type: "price",
+        label: "Alteração de Preço",
+        productName: prod.name,
+        detail: `R$ ${num.toFixed(2)}`,
+        date: nowTime,
+      });
+
       showNotification(`Preço de "${prod.name}" alterado para R$ ${num.toFixed(2)}.`);
     }
   };
@@ -450,6 +525,38 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
 
     onUpdateProduct(updated);
+
+    // Requirement: Registrar apenas a última atualização mais recente
+    const nowTime = new Date().toLocaleDateString("pt-BR") + " às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    const imageChanged = editingProduct.imageUrl !== (editProdImageUrl.trim() || editingProduct.imageUrl);
+    const priceChanged = editingProduct.price !== numPrice || editingProduct.isPriceOnDemand !== editProdIsPriceOnDemand;
+
+    if (imageChanged) {
+      recordLatestUpdate({
+        type: "image",
+        label: "Nova Foto / Imagem",
+        productName: updated.name,
+        detail: "Foto atualizada",
+        date: nowTime,
+      });
+    } else if (priceChanged) {
+      recordLatestUpdate({
+        type: "price",
+        label: "Alteração de Preço",
+        productName: updated.name,
+        detail: numPrice > 0 ? `R$ ${numPrice.toFixed(2)}` : "Sob Consulta",
+        date: nowTime,
+      });
+    } else {
+      recordLatestUpdate({
+        type: "product",
+        label: "Produto Atualizado",
+        productName: updated.name,
+        detail: numPrice > 0 ? `R$ ${numPrice.toFixed(2)}` : undefined,
+        date: nowTime,
+      });
+    }
+
     setEditingProduct(null);
     showNotification(`Produto "${updated.name}" atualizado com sucesso!`);
   };
@@ -577,6 +684,83 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showNotification("Download do CSV de Clientes iniciado!");
   };
 
+  const [isPushingCatalog, setIsPushingCatalog] = useState(false);
+  const [isPushingCategories, setIsPushingCategories] = useState(false);
+  const [isSyncingAllData, setIsSyncingAllData] = useState(false);
+
+  const handleDownloadCatalogCSV = () => {
+    const csv = exportCatalogToCSV(products);
+    const date = new Date().toISOString().split("T")[0];
+    downloadCSV(`papoula_catalogo_produtos_${date}.csv`, csv);
+    showNotification("Download do CSV do Catálogo iniciado!");
+  };
+
+  const handleDownloadCategoriesCSV = () => {
+    const csv = exportCategoriesToCSV(categories);
+    const date = new Date().toISOString().split("T")[0];
+    downloadCSV(`papoula_categorias_${date}.csv`, csv);
+    showNotification("Download do CSV de Categorias iniciado!");
+  };
+
+  const handlePushCatalogToSheets = async () => {
+    const url = googleDriveConfig.sheetWebhookUrl || sheetWebhookUrl;
+    if (!url?.trim()) {
+      showNotification("Configure primeiro a URL do Webhook na aba Banco Google Drive.");
+      setActiveMenu("database");
+      return;
+    }
+    setIsPushingCatalog(true);
+    try {
+      const res = await syncCatalogToGoogleSheets(url.trim(), products);
+      showNotification(res.success ? "✅ Catálogo salvo na planilha com sucesso (aba Catalogo)!" : `⚠️ ${res.message}`);
+    } catch (e: any) {
+      showNotification("Erro ao salvar catálogo: " + e.message);
+    } finally {
+      setIsPushingCatalog(false);
+    }
+  };
+
+  const handlePushCategoriesToSheets = async () => {
+    const url = googleDriveConfig.sheetWebhookUrl || sheetWebhookUrl;
+    if (!url?.trim()) {
+      showNotification("Configure primeiro a URL do Webhook na aba Banco Google Drive.");
+      setActiveMenu("database");
+      return;
+    }
+    setIsPushingCategories(true);
+    try {
+      const res = await syncCategoriesToGoogleSheets(url.trim(), categories);
+      showNotification(res.success ? "✅ Categorias salvas na planilha com sucesso (aba Categorias)!" : `⚠️ ${res.message}`);
+    } catch (e: any) {
+      showNotification("Erro ao salvar categorias: " + e.message);
+    } finally {
+      setIsPushingCategories(false);
+    }
+  };
+
+  const handleSyncAllToSheets = async () => {
+    const url = googleDriveConfig.sheetWebhookUrl || sheetWebhookUrl;
+    if (!url?.trim()) {
+      showNotification("Configure primeiro a URL do Webhook na aba Banco Google Drive.");
+      setActiveMenu("database");
+      return;
+    }
+    setIsSyncingAllData(true);
+    try {
+      const res = await syncAllToGoogleSheets(url.trim(), {
+        orders: kanbanOrders,
+        products,
+        categories,
+        customers
+      });
+      showNotification(res.success ? "✅ Sincronização completa realizada! (Abas Pedidos, Catalogo e Categorias atualizadas)" : `⚠️ ${res.message}`);
+    } catch (e: any) {
+      showNotification("Erro ao sincronizar tudo: " + e.message);
+    } finally {
+      setIsSyncingAllData(false);
+    }
+  };
+
   const monthBirthdaysCount = customers.filter((c) => isBirthdayInCurrentMonth(c.birthDate)).length;
   const withBirthdaysCount = customers.filter((c) => !!c.birthDate && c.birthDate.trim() !== "").length;
   const withOrdersCount = customers.filter((c) => (c.totalOrders || 0) > 0).length;
@@ -604,7 +788,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   return (
     <div className="min-h-screen bg-stone-100 flex flex-col">
       {/* Top Header bar with Logo */}
-      <header className="bg-[#114b30] text-white px-4 sm:px-8 py-3.5 shadow-md flex items-center justify-between border-b border-emerald-950/30">
+      <header className="sticky top-0 z-30 bg-[#114b30] text-white px-4 sm:px-8 py-3.5 shadow-md flex items-center justify-between border-b border-emerald-950/30">
         <div className="flex items-center gap-3">
           <PapoulaLogo size="md" variant="light" />
           <div className="hidden sm:block pl-3 border-l border-emerald-700/60">
@@ -725,7 +909,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="flex-1 flex flex-col md:flex-row">
           
           {/* LEFT LATERAL SIDEBAR */}
-          <aside className="w-full md:w-64 bg-[#0d3b26] text-white flex md:flex-col justify-between shrink-0 border-r border-emerald-900/50">
+          <aside className="w-full md:w-64 bg-[#0d3b26] text-white flex md:flex-col justify-between shrink-0 border-r border-emerald-900/50 md:sticky md:top-[61px] md:h-[calc(100vh-61px)] md:overflow-y-auto z-20">
             <div className="p-3 sm:p-4 space-y-1.5 w-full overflow-x-auto md:overflow-x-visible flex md:flex-col gap-1 md:gap-1.5">
               
               <div className="hidden md:block px-3 py-2 text-[10px] font-extrabold uppercase tracking-widest text-emerald-400/80">
@@ -848,8 +1032,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
             </div>
 
-            {/* Bottom Quick Store Info */}
-            <div className="hidden md:block p-4 border-t border-emerald-900/50 bg-[#09291a] text-[11px] text-emerald-300/80 space-y-2">
+            {/* Bottom Quick Store Info & Apenas Última Atualização */}
+            <div className="hidden md:block p-3.5 border-t border-emerald-900/50 bg-[#09291a] text-[11px] text-emerald-300/80 space-y-2.5">
               <div className="flex items-center justify-between">
                 <span>Loja Física:</span>
                 <strong className="text-white">Rua Mato Grosso 211B</strong>
@@ -858,12 +1042,39 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>WhatsApp:</span>
                 <strong className="text-amber-300">(38) 98851-2855</strong>
               </div>
-              <button
-                onClick={onResetToDefaults}
-                className="w-full mt-2 py-1.5 text-center text-[10px] text-emerald-400 hover:text-white hover:bg-white/10 rounded border border-emerald-800 transition-colors cursor-pointer"
-              >
-                Restaurar Dados Padrão
-              </button>
+
+              {/* Card de Última Atualização (Apenas a última atualização mais recente) */}
+              <div className="pt-2 border-t border-emerald-900/80 bg-emerald-950/70 p-2.5 rounded-xl border border-emerald-800/40 space-y-1.5">
+                <div className="flex items-center justify-between text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                  <span className="flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Última Atualização</span>
+                  </span>
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                </div>
+
+                <div className="text-[11px] text-emerald-200/90 leading-tight">
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <span className="text-emerald-400 font-semibold text-[10px] flex items-center gap-1">
+                      {lastUpdate.type === "product" && "📦"}
+                      {lastUpdate.type === "price" && "💰"}
+                      {lastUpdate.type === "image" && "📸"}
+                      {lastUpdate.label}:
+                    </span>
+                    {lastUpdate.detail && (
+                      <span className="text-amber-300 font-bold text-[10px] shrink-0">
+                        {lastUpdate.detail}
+                      </span>
+                    )}
+                  </div>
+                  <strong className="text-white truncate block text-[11px]" title={lastUpdate.productName}>
+                    {lastUpdate.productName}
+                  </strong>
+                  <span className="text-[9px] text-emerald-400/80 block mt-0.5">
+                    {lastUpdate.date}
+                  </span>
+                </div>
+              </div>
             </div>
           </aside>
 
@@ -1420,15 +1631,69 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </p>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={handlePushCatalogToSheets}
+                      disabled={isPushingCatalog}
+                      className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors disabled:opacity-50"
+                      title="Salvar e sincronizar todo o catálogo na aba 'Catalogo' da sua Planilha Google"
+                    >
+                      <Send className="w-3.5 h-3.5 text-amber-300" />
+                      <span>{isPushingCatalog ? "Salvando na Planilha..." : "Salvar na Planilha Google"}</span>
+                    </button>
+
+                    <button
+                      onClick={handleDownloadCatalogCSV}
+                      className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                      title="Exportar catálogo em arquivo CSV"
+                    >
+                      <Download className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>Exportar CSV</span>
+                    </button>
+
+                    <label className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors" title="Importar produtos de um arquivo CSV">
+                      <Upload className="w-3.5 h-3.5 text-stone-600" />
+                      <span>Importar CSV</span>
+                      <input
+                        type="file"
+                        accept=".csv"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = (evt) => {
+                            try {
+                              const text = evt.target?.result as string;
+                              const parsed = parseCatalogFromCSV(text);
+                              if (parsed.length > 0) {
+                                if (onBatchImportProducts) {
+                                  onBatchImportProducts(parsed, categories, false);
+                                } else {
+                                  parsed.forEach((p) => onAddProduct(p));
+                                }
+                                showNotification(`✅ ${parsed.length} produtos importados do CSV!`);
+                              } else {
+                                showNotification("⚠️ Nenhum produto reconhecido no CSV.");
+                              }
+                            } catch (err: any) {
+                              showNotification("Erro ao ler CSV: " + err.message);
+                            }
+                          };
+                          reader.readAsText(file, "UTF-8");
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+
                     {onClearProducts && products.length > 0 && (
                       <button
                         onClick={onClearProducts}
-                        className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs cursor-pointer transition-colors"
+                        className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
                         title="Limpar todos os produtos do catálogo"
                       >
-                        <Trash2 className="w-4 h-4 text-rose-600" />
-                        <span>Limpar Todo o Catálogo ({products.length})</span>
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Limpar ({products.length})</span>
                       </button>
                     )}
                   </div>
@@ -1799,16 +2064,68 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       Organize a vitrine da floricultura criando seções temáticas e ícones.
                     </p>
                   </div>
-                  {onClearCategories && categories.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-2">
                     <button
-                      onClick={onClearCategories}
-                      className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto transition-colors"
-                      title="Limpar todas as categorias"
+                      onClick={handlePushCategoriesToSheets}
+                      disabled={isPushingCategories}
+                      className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors disabled:opacity-50"
+                      title="Salvar e sincronizar todas as categorias na aba 'Categorias' da sua Planilha Google"
                     >
-                      <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                      <span>Limpar Todas as Categorias</span>
+                      <Send className="w-3.5 h-3.5 text-amber-200" />
+                      <span>{isPushingCategories ? "Salvando na Planilha..." : "Salvar na Planilha Google"}</span>
                     </button>
-                  )}
+
+                    <button
+                      onClick={handleDownloadCategoriesCSV}
+                      className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
+                      title="Exportar categorias em arquivo CSV"
+                    >
+                      <Download className="w-3.5 h-3.5 text-amber-800" />
+                      <span>Exportar CSV</span>
+                    </button>
+
+                    <label className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors" title="Importar categorias de um arquivo CSV">
+                      <Upload className="w-3.5 h-3.5 text-stone-600" />
+                      <span>Importar CSV</span>
+                      <input
+                        type="file"
+                        accept=".csv"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = (evt) => {
+                            try {
+                              const text = evt.target?.result as string;
+                              const parsed = parseCategoriesFromCSV(text);
+                              if (parsed.length > 0) {
+                                parsed.forEach((c) => onAddCategory(c));
+                                showNotification(`✅ ${parsed.length} categorias importadas do CSV!`);
+                              } else {
+                                showNotification("⚠️ Nenhuma categoria reconhecida no CSV.");
+                              }
+                            } catch (err: any) {
+                              showNotification("Erro ao ler CSV: " + err.message);
+                            }
+                          };
+                          reader.readAsText(file, "UTF-8");
+                          e.target.value = "";
+                        }}
+                      />
+                    </label>
+
+                    {onClearCategories && categories.length > 0 && (
+                      <button
+                        onClick={onClearCategories}
+                        className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto transition-colors"
+                        title="Limpar todas as categorias"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                        <span>Limpar Todas ({categories.length})</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4">
@@ -2381,21 +2698,54 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
                         <FileSpreadsheet className="w-5 h-5 text-emerald-800" />
-                        <span>Exportação Manual de Arquivos</span>
+                        <span>Exportações & Sincronização por Aba</span>
                       </div>
                       <p className="text-xs text-stone-500 leading-relaxed">
-                        Faça o download imediato das planilhas compatíveis com Excel, Google Drive e Google Sheets.
+                        Exporte e sincronize pedidos, catálogo de flores e categorias com as abas da sua planilha Google.
                       </p>
 
-                      <div className="space-y-2 pt-2">
+                      {/* Master Sync All Button */}
+                      <button
+                        type="button"
+                        onClick={handleSyncAllToSheets}
+                        disabled={isSyncingAllData}
+                        className="w-full py-3 px-3 bg-gradient-to-r from-emerald-800 to-[#114b30] hover:from-emerald-700 hover:to-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all hover:scale-[1.01] disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-4 h-4 text-amber-300 ${isSyncingAllData ? "animate-spin" : ""}`} />
+                        <span>{isSyncingAllData ? "Sincronizando Tudo..." : "⚡ Sincronizar Tudo (Catálogo, Categorias e Pedidos)"}</span>
+                      </button>
+
+                      <div className="space-y-2 pt-1">
                         <button
                           type="button"
                           onClick={() => downloadOfficialSpreadsheetTemplate()}
-                          className="w-full py-3 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all hover:scale-[1.01]"
+                          className="w-full py-2 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-colors"
                         >
                           <Download className="w-4 h-4 text-amber-300" />
-                          <span>📥 Baixar Modelo Oficial de Planilha (.CSV)</span>
+                          <span>📥 Baixar Modelo Oficial Multi-Abas (.CSV)</span>
                         </button>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <button
+                            type="button"
+                            onClick={handleDownloadCatalogCSV}
+                            className="py-2 px-2 bg-stone-50 hover:bg-stone-100 text-stone-800 border border-stone-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                            title="Baixar Catálogo de Produtos em CSV"
+                          >
+                            <Download className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>Catálogo CSV ({products.length})</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleDownloadCategoriesCSV}
+                            className="py-2 px-2 bg-stone-50 hover:bg-stone-100 text-stone-800 border border-stone-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
+                            title="Baixar Categorias em CSV"
+                          >
+                            <Download className="w-3.5 h-3.5 text-amber-700" />
+                            <span>Categorias CSV ({categories.length})</span>
+                          </button>
+                        </div>
 
                         <button
                           type="button"
@@ -2403,7 +2753,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-colors"
                         >
                           <Download className="w-4 h-4 text-emerald-700" />
-                          <span>Exportar Pedidos Atuais ({kanbanOrders.length})</span>
+                          <span>Exportar Pedidos ({kanbanOrders.length})</span>
                         </button>
 
                         <button
@@ -2412,23 +2762,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           className="w-full py-2 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
                         >
                           <Download className="w-4 h-4 text-stone-600" />
-                          <span>Exportar Clientes & Aniversários ({customers.length})</span>
+                          <span>Exportar Clientes ({customers.length})</span>
                         </button>
                       </div>
 
                       {/* Instructions for upload */}
                       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-950 space-y-1.5">
-                        <strong className="block text-amber-900 font-bold">Como colocar no Google Drive:</strong>
-                        <p className="leading-tight">1. Clique no botão acima para <strong>baixar o arquivo CSV pronto</strong>.</p>
-                        <p className="leading-tight">2. Abra o <a href="https://drive.google.com" target="_blank" rel="noreferrer" className="underline font-bold text-amber-900">Google Drive</a> e arraste o arquivo para a sua pasta.</p>
-                        <p className="leading-tight">3. Clique com o botão direito no arquivo no Drive e selecione <em>"Abrir com" &rarr; "Planilhas Google"</em>.</p>
+                        <strong className="block text-amber-900 font-bold">Como funciona a planilha multi-abas:</strong>
+                        <p className="leading-tight">1. A planilha possui 3 abas: <strong>Pedidos</strong>, <strong>Catalogo</strong> e <strong>Categorias</strong>.</p>
+                        <p className="leading-tight">2. Ao salvar ou usar o Webhook, todas as alterações são salvas diretamente nas respectivas abas.</p>
                       </div>
                     </div>
 
                     <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-[11px] text-stone-600 space-y-1">
                       <span className="font-bold text-stone-800 block">Status da Sincronização:</span>
                       <p>Última sincronização: <strong>{googleDriveConfig.lastSyncedAt || "Nenhuma ainda"}</strong></p>
-                      <p>Modo Automático: <strong className={googleDriveConfig.autoSync ? "text-emerald-700" : "text-stone-500"}>{googleDriveConfig.autoSync ? "Ativo" : "Manual"}</strong></p>
+                      <p>Modo Automático: <strong className={googleDriveConfig.autoSync ? "text-emerald-700" : "text-stone-500"}>{googleDriveConfig.autoSync ? "Ativo (Sincroniza ao abrir)" : "Manual"}</strong></p>
                     </div>
                   </div>
 
@@ -2929,9 +3278,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         onClose={() => setIsDriveModalOpen(false)}
         orders={kanbanOrders}
         customers={customers}
+        products={products}
+        categories={categories}
         config={googleDriveConfig}
         onSaveConfig={onUpdateGoogleDriveConfig}
         onImportOrders={onBatchImportOrders}
+        onImportProducts={(importedProducts) => {
+          if (onBatchImportProducts) {
+            onBatchImportProducts(importedProducts, categories, false);
+          } else {
+            importedProducts.forEach((p) => onAddProduct(p));
+          }
+        }}
+        onImportCategories={(importedCats) => {
+          importedCats.forEach((c) => onAddCategory(c));
+        }}
       />
 
       {/* AI Catalog Extractor Modal */}

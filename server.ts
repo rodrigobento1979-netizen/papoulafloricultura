@@ -57,10 +57,10 @@ const fallbackMessages: Record<string, string[]> = {
   ],
 };
 
-// API Endpoint for syncing orders directly from Google Sheets / Apps Script Webhook
+// API Endpoint for syncing orders, catalog and categories with Google Sheets / Apps Script Webhook
 app.post("/api/sync-sheets", async (req, res) => {
   try {
-    const { url, spreadsheetId, folderUrl } = req.body;
+    const { url, spreadsheetId, folderUrl, action, products, categories, catalog, orders } = req.body;
     let target = (url || "").trim();
     const sheetId = (spreadsheetId || "").trim();
     const folder = (folderUrl || "").trim();
@@ -91,13 +91,41 @@ app.post("/api/sync-sheets", async (req, res) => {
 
     // Strategy 1: If it is a Google Apps Script Web App URL
     if (target.includes("script.google.com")) {
+      // If it's a write action (syncCatalog, syncCategories, syncAll, newOrder)
+      if (action && action !== "getOrders" && action !== "getData" && action !== "list") {
+        try {
+          const postRes = await fetch(target, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Accept": "application/json, text/plain, */*",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            body: JSON.stringify(req.body),
+            redirect: "follow",
+          });
+
+          if (postRes.ok) {
+            const text = await postRes.text();
+            try {
+              const jsonData = JSON.parse(text);
+              return res.json(jsonData);
+            } catch {
+              return res.json({ success: true, message: "Dados enviados com sucesso para o Apps Script!" });
+            }
+          }
+        } catch (postErr) {
+          console.warn("POST to Apps Script failed:", postErr);
+        }
+      }
+
       let scriptUrl = target;
       if (!scriptUrl.includes("_t=")) {
         const sep = scriptUrl.includes("?") ? "&" : "?";
         scriptUrl = `${scriptUrl}${sep}_t=${Date.now()}`;
       }
 
-      // 1A: Try GET request
+      // 1A: Try GET request to read data
       try {
         const getRes = await fetch(scriptUrl, {
           method: "GET",
@@ -113,10 +141,15 @@ app.post("/api/sync-sheets", async (req, res) => {
           if (!text.includes("accounts.google.com") && !text.includes("ServiceLogin")) {
             try {
               const jsonData = JSON.parse(text);
-              if (jsonData && Array.isArray(jsonData.orders)) {
-                return res.json({ success: true, orders: jsonData.orders, count: jsonData.orders.length });
-              } else if (Array.isArray(jsonData)) {
-                return res.json({ success: true, orders: jsonData, count: jsonData.length });
+              if (jsonData) {
+                return res.json({
+                  success: true,
+                  orders: jsonData.orders || (Array.isArray(jsonData) ? jsonData : []),
+                  catalog: jsonData.catalog || jsonData.products || [],
+                  products: jsonData.products || jsonData.catalog || [],
+                  categories: jsonData.categories || [],
+                  count: Array.isArray(jsonData.orders) ? jsonData.orders.length : (Array.isArray(jsonData) ? jsonData.length : 0),
+                });
               }
             } catch {
               // Not JSON, continue to POST attempt
@@ -127,7 +160,7 @@ app.post("/api/sync-sheets", async (req, res) => {
         console.warn("GET to Apps Script failed, trying POST fallback:", getErr);
       }
 
-      // 1B: Try POST request with action: 'getOrders'
+      // 1B: Try POST request with action: 'getData' / 'getOrders'
       try {
         const postRes = await fetch(target, {
           method: "POST",
@@ -136,7 +169,7 @@ app.post("/api/sync-sheets", async (req, res) => {
             "Accept": "application/json, text/plain, */*",
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
           },
-          body: JSON.stringify({ action: "getOrders", method: "list" }),
+          body: JSON.stringify({ action: "getData", method: "list" }),
           redirect: "follow",
         });
 
@@ -145,10 +178,15 @@ app.post("/api/sync-sheets", async (req, res) => {
           if (!text.includes("accounts.google.com") && !text.includes("ServiceLogin")) {
             try {
               const jsonData = JSON.parse(text);
-              if (jsonData && Array.isArray(jsonData.orders)) {
-                return res.json({ success: true, orders: jsonData.orders, count: jsonData.orders.length });
-              } else if (Array.isArray(jsonData)) {
-                return res.json({ success: true, orders: jsonData, count: jsonData.length });
+              if (jsonData) {
+                return res.json({
+                  success: true,
+                  orders: jsonData.orders || (Array.isArray(jsonData) ? jsonData : []),
+                  catalog: jsonData.catalog || jsonData.products || [],
+                  products: jsonData.products || jsonData.catalog || [],
+                  categories: jsonData.categories || [],
+                  count: Array.isArray(jsonData.orders) ? jsonData.orders.length : (Array.isArray(jsonData) ? jsonData.length : 0),
+                });
               }
             } catch {
               // Not JSON
@@ -160,7 +198,7 @@ app.post("/api/sync-sheets", async (req, res) => {
       }
     }
 
-    // Strategy 2: If we have a Google Sheet ID, fetch direct CSV export (no Apps Script needed!)
+    // Strategy 2: If we have a Google Sheet ID, fetch direct CSV export
     if (directSheetId) {
       const csvUrls = [
         `https://docs.google.com/spreadsheets/d/${directSheetId}/export?format=csv&id=${directSheetId}`,
@@ -203,7 +241,7 @@ app.post("/api/sync-sheets", async (req, res) => {
       return res.json({
         success: false,
         error:
-          "O Google Apps Script não retornou os dados dos pedidos. Certifique-se de que o código no Apps Script contém a função 'doGet' e 'doPost' atualizadas e que a Implantação foi criada como 'Qualquer pessoa' (Anyone). Você também pode colar o link direto da sua Planilha Google Sheets para sincronização instantânea.",
+          "O Google Apps Script não retornou os dados da planilha. Certifique-se de que o código no Apps Script contém as funções 'doGet' e 'doPost' atualizadas e que a Implantação foi criada como 'Qualquer pessoa' (Anyone).",
       });
     }
 

@@ -4,23 +4,18 @@ import {
   Calendar, 
   Search, 
   X, 
-  MessageCircle, 
   DollarSign, 
   Download, 
   Database, 
-  Cake, 
   Edit, 
   Trash2,
   CheckCircle2,
-  Clock,
-  Filter,
   RefreshCw,
   Upload,
   AlertCircle
 } from "lucide-react";
 import { KanbanOrder, KanbanOrderStatus, Product, GoogleDriveConfig } from "../types";
 import { EditOrderModal } from "./EditOrderModal";
-import { WhatsAppOrderModal } from "./WhatsAppOrderModal";
 import { 
   exportOrdersToCSV, 
   downloadCSV, 
@@ -68,6 +63,30 @@ const STATUS_CONFIG: Record<KanbanOrderStatus, { label: string; badgeBg: string;
   },
 };
 
+// Helper to extract clean order number (e.g. "#PAP-102" -> "102", "#101" -> "101")
+const formatCleanOrderNumber = (rawNum: string | undefined): string => {
+  if (!rawNum) return "—";
+  const trimmed = rawNum.trim();
+  const digitsOrClean = trimmed.replace(/^[#A-Za-z\-_]+/, "").trim();
+  return digitsOrClean || trimmed.replace(/^#/, "");
+};
+
+// Helper to format date only (without time)
+const formatDateOnly = (dateStr: string | undefined): string => {
+  if (!dateStr) return "—";
+  try {
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return dateStr.split("T")[0] || dateStr;
+    return d.toLocaleDateString("pt-BR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "2-digit",
+    });
+  } catch {
+    return dateStr;
+  }
+};
+
 export const OrdersList: React.FC<OrdersListProps> = ({
   orders,
   products,
@@ -88,7 +107,6 @@ export const OrdersList: React.FC<OrdersListProps> = ({
 
   // Modals state
   const [editingOrder, setEditingOrder] = useState<KanbanOrder | null>(null);
-  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
 
   // Sync state
   const [isSyncing, setIsSyncing] = useState(false);
@@ -238,8 +256,7 @@ export const OrdersList: React.FC<OrdersListProps> = ({
       const matchProd = o.productName?.toLowerCase().includes(q);
       const matchCity = o.deliveryCity?.toLowerCase().includes(q);
       const matchAddr = o.deliveryAddress?.toLowerCase().includes(q);
-      const matchMsg = o.cardMessage?.toLowerCase().includes(q);
-      if (!matchNum && !matchCust && !matchPhone && !matchProd && !matchCity && !matchAddr && !matchMsg) return false;
+      if (!matchNum && !matchCust && !matchPhone && !matchProd && !matchCity && !matchAddr) return false;
     }
     return true;
   });
@@ -373,11 +390,11 @@ export const OrdersList: React.FC<OrdersListProps> = ({
         </div>
       )}
 
-      {/* FILTER CONTROLS & ACTIONS BAR */}
+      {/* FILTER CONTROLS & COMPACT ACTIONS BAR */}
       <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-xs space-y-3.5">
         
-        {/* Row 1: Header + Action buttons */}
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-stone-100">
+        {/* Row 1: Header + Compact Icon Actions */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-stone-100">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-[#114b30] text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
               <ShoppingBag className="w-5 h-5 text-amber-300" />
@@ -386,29 +403,30 @@ export const OrdersList: React.FC<OrdersListProps> = ({
               <h2 className="font-serif font-bold text-base sm:text-lg text-stone-900 flex items-center gap-2">
                 <span>Listagem Geral de Pedidos</span>
                 <span className="text-xs bg-emerald-100 text-emerald-950 font-bold px-2.5 py-0.5 rounded-full">
-                  {filteredOrders.length} {filteredOrders.length === 1 ? "pedido encontrado" : "pedidos encontrados"}
+                  {filteredOrders.length} {filteredOrders.length === 1 ? "pedido" : "pedidos"}
                 </span>
               </h2>
               <p className="text-xs text-stone-500">
-                Lista de todos os pedidos cadastrados na planilha com filtro de data e busca rápida.
+                Lista compacta de pedidos da planilha com filtros e busca rápida.
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 flex-wrap">
-            {/* Sync from Google Sheets Button */}
+          {/* 1º Requirement: Sincronização, Importar, Exportar e Banco de Dados em Apenas Ícones */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {/* Sync from Google Sheets Icon Button */}
             <button
               type="button"
               onClick={handleSyncFromSheets}
               disabled={isSyncing}
-              className="px-3.5 py-2 bg-[#114b30] hover:bg-[#0c3924] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 disabled:opacity-60"
-              title="Puxar pedidos cadastrados na Planilha Google"
+              className="p-2.5 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl shadow-2xs transition-all cursor-pointer hover:scale-105 disabled:opacity-60 flex items-center justify-center"
+              title="Sincronizar com a Planilha Google"
+              aria-label="Sincronizar Planilha Google"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin text-amber-300" : "text-amber-300"}`} />
-              <span>{isSyncing ? "Sincronizando..." : "Sincronizar Planilha"}</span>
+              <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin text-amber-300" : "text-amber-300"}`} />
             </button>
 
-            {/* Import CSV button */}
+            {/* Import CSV Icon Button */}
             <input
               ref={fileInputRef}
               type="file"
@@ -419,54 +437,47 @@ export const OrdersList: React.FC<OrdersListProps> = ({
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="px-3 py-2 bg-stone-100 hover:bg-emerald-50 text-stone-800 hover:text-emerald-950 border border-stone-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Importar pedidos de arquivo CSV baixado do Google Drive"
+              className="p-2.5 bg-stone-100 hover:bg-emerald-50 text-stone-800 hover:text-emerald-950 border border-stone-300 rounded-xl transition-all cursor-pointer hover:scale-105 flex items-center justify-center"
+              title="Importar Pedidos via CSV"
+              aria-label="Importar Pedidos CSV"
             >
-              <Upload className="w-3.5 h-3.5 text-emerald-800" />
-              <span>Importar CSV</span>
+              <Upload className="w-4 h-4 text-emerald-800" />
             </button>
 
-            {/* Create WhatsApp Order button */}
+            {/* Export CSV Icon Button */}
             <button
-              onClick={() => setIsWhatsAppModalOpen(true)}
-              className="px-3.5 py-2 bg-[#25D366] hover:bg-[#1ebd59] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102"
-              title="Cadastrar Novo Pedido"
-            >
-              <MessageCircle className="w-4 h-4" />
-              <span>+ Novo Pedido</span>
-            </button>
-
-            {/* Export CSV button */}
-            <button
+              type="button"
               onClick={handleExportCSV}
-              className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Baixar lista em arquivo CSV / Excel"
+              className="p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl transition-all cursor-pointer hover:scale-105 flex items-center justify-center"
+              title="Exportar Pedidos para CSV"
+              aria-label="Exportar Pedidos CSV"
             >
-              <Download className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Exportar CSV</span>
+              <Download className="w-4 h-4 text-emerald-700" />
             </button>
 
-            {/* Google Drive button */}
+            {/* Google Drive / Database Icon Button */}
             {onOpenDatabaseSettings && (
               <button
+                type="button"
                 onClick={onOpenDatabaseSettings}
-                className="px-3 py-2 bg-stone-100 hover:bg-emerald-50 text-stone-700 hover:text-emerald-900 border border-stone-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                title="Configurar Google Drive & Planilhas"
+                className="p-2.5 bg-stone-100 hover:bg-emerald-50 text-stone-700 hover:text-emerald-900 border border-stone-300 rounded-xl transition-all cursor-pointer hover:scale-105 flex items-center justify-center"
+                title="Configurar Google Drive & Banco de Dados"
+                aria-label="Google Drive & Banco de Dados"
               >
-                <Database className="w-3.5 h-3.5 text-emerald-800" />
-                <span>Google Drive</span>
+                <Database className="w-4 h-4 text-emerald-800" />
               </button>
             )}
 
-            {/* Clear orders button */}
+            {/* Clear orders Icon button */}
             {onClearOrders && orders.length > 0 && (
               <button
+                type="button"
                 onClick={onClearOrders}
-                className="px-2.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
-                title="Limpar todos os pedidos"
+                className="p-2.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
+                title={`Limpar todos os ${orders.length} pedidos`}
+                aria-label="Limpar Pedidos"
               >
-                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                <span>Limpar</span>
+                <Trash2 className="w-4 h-4 text-rose-600" />
               </button>
             )}
           </div>
@@ -479,7 +490,7 @@ export const OrdersList: React.FC<OrdersListProps> = ({
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-xs font-bold text-stone-500 flex items-center gap-1 mr-1">
               <Calendar className="w-3.5 h-3.5 text-[#114b30]" />
-              <span>Filtrar por Data:</span>
+              <span>Filtrar:</span>
             </span>
 
             {[
@@ -581,17 +592,16 @@ export const OrdersList: React.FC<OrdersListProps> = ({
 
       </div>
 
-      {/* LISTAGEM DE PEDIDOS EM TABELA COMPLETA */}
+      {/* LISTAGEM DE PEDIDOS COMPACTA (SEM COLUNA ANIVERSÁRIO, SEM MENSAGEM DO CARTÃO NA COLUNA PRODUTO, BOTÕES ÍCONE) */}
       <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
             <thead className="bg-stone-100 text-stone-700 font-bold uppercase text-[10px] tracking-wider border-b border-stone-200">
               <tr>
-                <th className="py-3 px-3.5">Nº Pedido</th>
-                <th className="py-3 px-3.5">Data / Hora</th>
+                <th className="py-3 px-3.5">Nº</th>
+                <th className="py-3 px-3.5">Data</th>
                 <th className="py-3 px-3.5">Cliente</th>
                 <th className="py-3 px-3.5">WhatsApp</th>
-                <th className="py-3 px-3.5">Aniversário</th>
                 <th className="py-3 px-3.5">Produto / Arranjo</th>
                 <th className="py-3 px-3.5">Endereço & Cidade</th>
                 <th className="py-3 px-3.5 text-stone-700">Custo Frete</th>
@@ -604,7 +614,7 @@ export const OrdersList: React.FC<OrdersListProps> = ({
             <tbody className="divide-y divide-stone-200">
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-12 px-4 text-center">
+                  <td colSpan={11} className="py-12 px-4 text-center">
                     <div className="max-w-md mx-auto space-y-3">
                       <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-[#114b30] flex items-center justify-center mx-auto shadow-xs">
                         <ShoppingBag className="w-6 h-6" />
@@ -659,15 +669,8 @@ export const OrdersList: React.FC<OrdersListProps> = ({
               ) : (
                 filteredOrders.map((order) => {
                   const statusInfo = STATUS_CONFIG[order.status] || STATUS_CONFIG.pedido;
-                  const formattedDate = order.createdAt
-                    ? new Date(order.createdAt).toLocaleDateString("pt-BR", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        year: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
-                    : "—";
+                  const formattedDateOnly = formatDateOnly(order.createdAt);
+                  const cleanNum = formatCleanOrderNumber(order.orderNumber);
 
                   const orderFreight = order.freightFee !== undefined 
                     ? order.freightFee 
@@ -683,16 +686,18 @@ export const OrdersList: React.FC<OrdersListProps> = ({
 
                   return (
                     <tr key={order.id} className="hover:bg-stone-50/80 transition-colors">
-                      <td className="py-3 px-3.5 font-mono font-bold text-emerald-950">
-                        {order.orderNumber}
+                      {/* 3º: Número do pedido: apenas o número */}
+                      <td className="py-2.5 px-3.5 font-mono font-bold text-emerald-950 whitespace-nowrap">
+                        {cleanNum}
                       </td>
-                      <td className="py-3 px-3.5 text-stone-500 font-medium whitespace-nowrap text-[11px]">
-                        {formattedDate}
+                      {/* 3º: Data/hora: apenas a data */}
+                      <td className="py-2.5 px-3.5 text-stone-600 font-medium whitespace-nowrap text-[11px]">
+                        {formattedDateOnly}
                       </td>
-                      <td className="py-3 px-3.5 font-semibold text-stone-900">
+                      <td className="py-2.5 px-3.5 font-semibold text-stone-900">
                         {order.customerName}
                       </td>
-                      <td className="py-3 px-3.5">
+                      <td className="py-2.5 px-3.5 whitespace-nowrap">
                         {order.customerPhone ? (
                           <a
                             href={buildWhatsAppUrl(order.customerPhone)}
@@ -700,63 +705,55 @@ export const OrdersList: React.FC<OrdersListProps> = ({
                             rel="noopener noreferrer"
                             className="text-emerald-700 hover:underline flex items-center gap-1 font-medium"
                           >
-                            <MessageCircle className="w-3.5 h-3.5 text-[#25D366]" />
+                            <span className="text-[#25D366] text-xs">💬</span>
                             <span>{order.customerPhone}</span>
                           </a>
                         ) : (
                           <span className="text-stone-400">—</span>
                         )}
                       </td>
-                      <td className="py-3 px-3.5 text-stone-600">
-                        {order.customerBirthDate ? (
-                          <span className="flex items-center gap-1 text-rose-700 font-medium">
-                            <Cake className="w-3.5 h-3.5 text-rose-500" />
-                            {order.customerBirthDate}
-                          </span>
-                        ) : (
-                          <span className="text-stone-400">—</span>
-                        )}
+                      {/* 3º: Coluna Produto: apenas nome do produto (sem mensagem do cartão) */}
+                      <td className="py-2.5 px-3.5 font-medium text-stone-800 max-w-xs">
+                        <span className="block truncate font-semibold" title={order.productName}>
+                          {order.productName}
+                        </span>
                       </td>
-                      <td className="py-3 px-3.5 font-medium text-stone-800 max-w-xs">
-                        <span className="block truncate font-semibold">{order.productName}</span>
-                        {order.cardMessage && (
-                          <span className="text-[10px] text-stone-400 italic block truncate">
-                            "{order.cardMessage}"
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3.5 text-stone-600 max-w-xs">
+                      <td className="py-2.5 px-3.5 text-stone-600 max-w-xs">
                         <span className="block truncate">{order.deliveryAddress || "Retirada na Loja"}</span>
                         <span className="text-[10px] font-bold text-[#114b30]">{order.deliveryCity}</span>
                       </td>
-                      <td className="py-3 px-3.5 font-medium text-stone-600 whitespace-nowrap">
+                      <td className="py-2.5 px-3.5 font-medium text-stone-600 whitespace-nowrap">
                         R$ {orderFreight.toFixed(2)}
                       </td>
-                      <td className="py-3 px-3.5 font-semibold text-emerald-800 whitespace-nowrap">
+                      <td className="py-2.5 px-3.5 font-semibold text-emerald-800 whitespace-nowrap">
                         R$ {orderRefPrice.toFixed(2)}
                       </td>
-                      <td className="py-3 px-3.5 font-bold text-emerald-950 whitespace-nowrap">
+                      <td className="py-2.5 px-3.5 font-bold text-emerald-950 whitespace-nowrap">
                         R$ {orderTotal.toFixed(2)}
                       </td>
-                      <td className="py-3 px-3.5">
-                        <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${statusInfo.badgeBg} ${statusInfo.badgeText}`}>
+                      <td className="py-2.5 px-3.5">
+                        <span className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full ${statusInfo.badgeBg} ${statusInfo.badgeText}`}>
                           {statusInfo.label}
                         </span>
                       </td>
-                      <td className="py-3 px-3.5 text-right space-x-1.5 whitespace-nowrap">
+                      {/* 3º: Ações: Editar usar apenas ícone */}
+                      <td className="py-2.5 px-3.5 text-right space-x-1 whitespace-nowrap">
                         <button
+                          type="button"
                           onClick={() => setEditingOrder(order)}
-                          className="px-2.5 py-1 text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors cursor-pointer inline-flex items-center gap-1"
+                          className="p-1.5 text-emerald-800 hover:text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center"
                           title="Editar / Ver detalhes do pedido"
+                          aria-label="Editar Pedido"
                         >
                           <Edit className="w-3.5 h-3.5" />
-                          <span>Editar</span>
                         </button>
                         {onDeleteOrder && (
                           <button
+                            type="button"
                             onClick={() => onDeleteOrder(order.id)}
-                            className="p-1 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center"
                             title="Remover pedido"
+                            aria-label="Remover Pedido"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -770,7 +767,7 @@ export const OrdersList: React.FC<OrdersListProps> = ({
             {filteredOrders.length > 0 && (
               <tfoot className="bg-stone-100/90 font-bold border-t-2 border-stone-300 text-stone-900">
                 <tr>
-                  <td colSpan={7} className="py-3 px-3.5 text-right text-[11px] uppercase tracking-wider text-stone-600">
+                  <td colSpan={6} className="py-3 px-3.5 text-right text-[11px] uppercase tracking-wider text-stone-600">
                     Totais do Período ({filteredOrders.length} {filteredOrders.length === 1 ? "pedido" : "pedidos"}):
                   </td>
                   <td className="py-3 px-3.5 font-bold text-stone-700 whitespace-nowrap">
@@ -797,14 +794,6 @@ export const OrdersList: React.FC<OrdersListProps> = ({
         onClose={() => setEditingOrder(null)}
         onSaveOrder={onUpdateOrder}
         products={products}
-      />
-
-      {/* WhatsApp Quick Order Modal */}
-      <WhatsAppOrderModal
-        isOpen={isWhatsAppModalOpen}
-        onClose={() => setIsWhatsAppModalOpen(false)}
-        products={products}
-        onCreateOrder={onAddOrder}
       />
 
     </div>

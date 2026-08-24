@@ -203,50 +203,77 @@ export default function App() {
     } catch (e) {}
   }, [storeConfig]);
 
-  // Automatic Background Synchronization with Google Sheets
+  // Automatic Background Synchronization with Google Sheets (Orders, Catalog, Categories)
   useEffect(() => {
     const webhookUrl = googleDriveConfig?.sheetWebhookUrl?.trim() || "";
     const spreadsheetId = googleDriveConfig?.spreadsheetId?.trim() || "";
     const folderUrl = googleDriveConfig?.folderUrl?.trim() || "";
+    const isAutoSyncEnabled = googleDriveConfig?.autoSync === true;
 
-    // If no credentials configured, skip auto sync
-    if (!webhookUrl && !spreadsheetId && !folderUrl) return;
+    // Verify if there is a valid URL or spreadsheet ID configured
+    const hasValidTarget =
+      (webhookUrl.startsWith("http://") || webhookUrl.startsWith("https://")) ||
+      (spreadsheetId.length > 5 && !spreadsheetId.includes(" ")) ||
+      (folderUrl.startsWith("http://") || folderUrl.startsWith("https://"));
+
+    // If auto-sync is off or no valid credentials configured, skip auto sync
+    if (!isAutoSyncEnabled || !hasValidTarget) return;
 
     // Run synchronization function
     const runAutoSync = async (silent = true) => {
       try {
-        const { fetchOrdersFromGoogleSheets, mergeOrders } = await import("./utils/googleDriveSync");
-        const res = await fetchOrdersFromGoogleSheets(webhookUrl, spreadsheetId, folderUrl);
-        if (res.success && Array.isArray(res.orders) && res.orders.length > 0) {
-          setKanbanOrders((prevOrders) => {
-            const { merged, addedCount, updatedCount } = mergeOrders(prevOrders, res.orders);
-            if (!silent && (addedCount > 0 || updatedCount > 0)) {
-              console.log(`[AutoSync] ${addedCount} novos pedidos adicionados, ${updatedCount} atualizados.`);
-            }
-            return merged;
-          });
+        const { fetchStoreDataFromGoogleSheets, mergeOrders } = await import("./utils/googleDriveSync");
+        const res = await fetchStoreDataFromGoogleSheets(webhookUrl, spreadsheetId, folderUrl);
+        
+        if (res.success) {
+          // 1. Sync Orders
+          if (Array.isArray(res.orders) && res.orders.length > 0) {
+            setKanbanOrders((prevOrders) => {
+              const { merged, addedCount, updatedCount } = mergeOrders(prevOrders, res.orders);
+              if (!silent && (addedCount > 0 || updatedCount > 0)) {
+                console.log(`[AutoSync] ${addedCount} novos pedidos adicionados, ${updatedCount} atualizados.`);
+              }
+              return merged;
+            });
+          }
+
+          // 2. Sync Catalog (if sheets contains products)
+          if (Array.isArray(res.products) && res.products.length > 0) {
+            setProducts((prevProds) => {
+              if (prevProds.length === 0) return res.products;
+              return res.products;
+            });
+          }
+
+          // 3. Sync Categories (if sheets contains categories)
+          if (Array.isArray(res.categories) && res.categories.length > 0) {
+            setCategories((prevCats) => {
+              if (prevCats.length === 0) return res.categories;
+              return res.categories;
+            });
+          }
 
           // Update lastSyncedAt timestamp in config
           setGoogleDriveConfig((prev) => ({
             ...prev,
-            lastSyncedAt: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+            lastSyncedAt: new Date().toLocaleDateString("pt-BR") + " às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
           }));
         }
       } catch (err) {
-        console.warn("[AutoSync] Falha na sincronização em segundo plano:", err);
+        // Silently capture background sync failure
       }
     };
 
     // 1. Initial automatic sync on mount / app load
     runAutoSync(true);
 
-    // 2. Periodic sync every 2 minutes if autoSync is true or credentials exist
+    // 2. Periodic background sync every 2 minutes
     const interval = setInterval(() => {
       runAutoSync(true);
     }, 120000); // 2 minutes
 
     return () => clearInterval(interval);
-  }, [googleDriveConfig.sheetWebhookUrl, googleDriveConfig.spreadsheetId, googleDriveConfig.folderUrl, googleDriveConfig.autoSync]);
+  }, [googleDriveConfig?.sheetWebhookUrl, googleDriveConfig?.spreadsheetId, googleDriveConfig?.folderUrl, googleDriveConfig?.autoSync]);
 
   // Filters and search state
   const [selectedCategory, setSelectedCategory] = useState<string>("todos");

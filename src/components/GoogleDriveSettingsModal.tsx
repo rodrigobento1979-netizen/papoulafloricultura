@@ -14,17 +14,28 @@ import {
   Info,
   Upload,
   AlertCircle,
-  FolderOpen
+  FolderOpen,
+  Flower2,
+  FolderTree,
+  Send
 } from "lucide-react";
-import { GoogleDriveConfig, KanbanOrder, Customer } from "../types";
+import { GoogleDriveConfig, KanbanOrder, Customer, Product, Category } from "../types";
 import { 
   exportOrdersToCSV, 
   exportCustomersToCSV, 
+  exportCatalogToCSV,
+  exportCategoriesToCSV,
   downloadCSV, 
   downloadOfficialSpreadsheetTemplate,
-  fetchOrdersFromGoogleSheets,
+  fetchStoreDataFromGoogleSheets,
   parseOrdersFromCSV,
-  mergeOrders
+  parseCatalogFromCSV,
+  parseCategoriesFromCSV,
+  mergeOrders,
+  syncCatalogToGoogleSheets,
+  syncCategoriesToGoogleSheets,
+  syncAllToGoogleSheets,
+  GOOGLE_APPS_SCRIPT_MASTER_CODE
 } from "../utils/googleDriveSync";
 
 interface GoogleDriveSettingsModalProps {
@@ -32,9 +43,13 @@ interface GoogleDriveSettingsModalProps {
   onClose: () => void;
   orders: KanbanOrder[];
   customers: Customer[];
+  products?: Product[];
+  categories?: Category[];
   config: GoogleDriveConfig;
   onSaveConfig: (config: GoogleDriveConfig) => void;
   onImportOrders?: (orders: KanbanOrder[]) => void;
+  onImportProducts?: (products: Product[]) => void;
+  onImportCategories?: (categories: Category[]) => void;
 }
 
 export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> = ({
@@ -42,9 +57,13 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
   onClose,
   orders,
   customers,
+  products = [],
+  categories = [],
   config,
   onSaveConfig,
   onImportOrders,
+  onImportProducts,
+  onImportCategories,
 }) => {
   const [webhookUrl, setWebhookUrl] = useState(config.sheetWebhookUrl || "");
   const [spreadsheetId, setSpreadsheetId] = useState(config.spreadsheetId || "");
@@ -53,14 +72,19 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
   const [savedNotice, setSavedNotice] = useState(false);
   const [copiedScript, setCopiedScript] = useState(false);
 
-  // Sync state
+  // Sync states
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isSyncingCatalog, setIsSyncingCatalog] = useState(false);
+  const [isSyncingCategories, setIsSyncingCategories] = useState(false);
+  const [isSyncingAll, setIsSyncingAll] = useState(false);
   const [syncStatus, setSyncStatus] = useState<{
     type: "idle" | "success" | "error";
     message: string;
   }>({ type: "idle", message: "" });
 
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const orderFileInputRef = useRef<HTMLInputElement>(null);
+  const catalogFileInputRef = useRef<HTMLInputElement>(null);
+  const categoryFileInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -83,13 +107,117 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
     downloadCSV(`papoula_pedidos_kanban_${date}.csv`, csv);
   };
 
+  const handleDownloadCatalog = () => {
+    const csv = exportCatalogToCSV(products);
+    const date = new Date().toISOString().split("T")[0];
+    downloadCSV(`papoula_catalogo_produtos_${date}.csv`, csv);
+  };
+
+  const handleDownloadCategories = () => {
+    const csv = exportCategoriesToCSV(categories);
+    const date = new Date().toISOString().split("T")[0];
+    downloadCSV(`papoula_categorias_${date}.csv`, csv);
+  };
+
   const handleDownloadCustomers = () => {
     const csv = exportCustomersToCSV(customers);
     const date = new Date().toISOString().split("T")[0];
     downloadCSV(`papoula_clientes_aniversarios_${date}.csv`, csv);
   };
 
-  // Pull Orders from Webhook via doGet() or direct Google Sheet
+  // Push Catalog to Google Sheets
+  const handlePushCatalogToSheets = async () => {
+    if (!webhookUrl.trim()) {
+      setSyncStatus({
+        type: "error",
+        message: "Informe a URL do Webhook do Google Apps Script para salvar o catálogo na planilha.",
+      });
+      return;
+    }
+
+    setIsSyncingCatalog(true);
+    setSyncStatus({ type: "idle", message: "" });
+
+    try {
+      const res = await syncCatalogToGoogleSheets(webhookUrl.trim(), products);
+      setSyncStatus({
+        type: res.success ? "success" : "error",
+        message: res.message,
+      });
+    } catch (err: any) {
+      setSyncStatus({
+        type: "error",
+        message: err.message || "Erro ao salvar catálogo na planilha.",
+      });
+    } finally {
+      setIsSyncingCatalog(false);
+    }
+  };
+
+  // Push Categories to Google Sheets
+  const handlePushCategoriesToSheets = async () => {
+    if (!webhookUrl.trim()) {
+      setSyncStatus({
+        type: "error",
+        message: "Informe a URL do Webhook do Google Apps Script para salvar as categorias na planilha.",
+      });
+      return;
+    }
+
+    setIsSyncingCategories(true);
+    setSyncStatus({ type: "idle", message: "" });
+
+    try {
+      const res = await syncCategoriesToGoogleSheets(webhookUrl.trim(), categories);
+      setSyncStatus({
+        type: res.success ? "success" : "error",
+        message: res.message,
+      });
+    } catch (err: any) {
+      setSyncStatus({
+        type: "error",
+        message: err.message || "Erro ao salvar categorias na planilha.",
+      });
+    } finally {
+      setIsSyncingCategories(false);
+    }
+  };
+
+  // Push Everything to Google Sheets
+  const handleSyncAllToSheets = async () => {
+    if (!webhookUrl.trim()) {
+      setSyncStatus({
+        type: "error",
+        message: "Informe a URL do Webhook do Google Apps Script para sincronizar todos os dados.",
+      });
+      return;
+    }
+
+    setIsSyncingAll(true);
+    setSyncStatus({ type: "idle", message: "" });
+
+    try {
+      const res = await syncAllToGoogleSheets(webhookUrl.trim(), {
+        orders,
+        products,
+        categories,
+        customers,
+      });
+      setSyncStatus({
+        type: res.success ? "success" : "error",
+        message: res.message,
+      });
+    } catch (err: any) {
+      setSyncStatus({
+        type: "error",
+        message: err.message || "Erro ao sincronizar todos os dados na planilha.",
+      });
+    } finally {
+      setIsSyncingAll(false);
+    }
+  };
+
+  // Pull All Store Data (Orders, Catalog, Categories) from Google Sheets
   const handleFetchFromSheets = async () => {
     if (!webhookUrl.trim() && !spreadsheetId.trim() && !folderUrl.trim()) {
       setSyncStatus({
@@ -103,30 +231,40 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
     setSyncStatus({ type: "idle", message: "" });
 
     try {
-      const result = await fetchOrdersFromGoogleSheets(webhookUrl.trim(), spreadsheetId.trim(), folderUrl.trim());
-      if (result.success && result.orders.length > 0) {
-        if (onImportOrders) {
-          const { merged, addedCount, updatedCount } = mergeOrders(orders, result.orders);
-          onImportOrders(merged);
-          setSyncStatus({
-            type: "success",
-            message: `Sincronização concluída! ${result.orders.length} pedidos carregados da planilha (${addedCount} novos adicionados, ${updatedCount} atualizados).`,
-          });
-        } else {
-          setSyncStatus({
-            type: "success",
-            message: `${result.orders.length} pedidos encontrados na planilha!`,
-          });
-        }
-      } else if (result.success && result.orders.length === 0) {
+      const result = await fetchStoreDataFromGoogleSheets(webhookUrl.trim(), spreadsheetId.trim(), folderUrl.trim());
+      
+      let msgParts: string[] = [];
+
+      if (result.orders && result.orders.length > 0 && onImportOrders) {
+        const { merged, addedCount, updatedCount } = mergeOrders(orders, result.orders);
+        onImportOrders(merged);
+        msgParts.push(`${result.orders.length} pedidos (${addedCount} novos, ${updatedCount} atualizados)`);
+      }
+
+      if (result.products && result.products.length > 0 && onImportProducts) {
+        onImportProducts(result.products);
+        msgParts.push(`${result.products.length} produtos no catálogo`);
+      }
+
+      if (result.categories && result.categories.length > 0 && onImportCategories) {
+        onImportCategories(result.categories);
+        msgParts.push(`${result.categories.length} categorias`);
+      }
+
+      if (msgParts.length > 0) {
         setSyncStatus({
           type: "success",
-          message: "Conexão estabelecida com sucesso, mas nenhuma linha de pedido foi encontrada na planilha.",
+          message: `Sincronização concluída com sucesso! Carregados: ${msgParts.join(", ")}.`,
+        });
+      } else if (result.success) {
+        setSyncStatus({
+          type: "success",
+          message: "Conexão estabelecida com a planilha, pronta para enviar e receber dados!",
         });
       } else {
         setSyncStatus({
           type: "error",
-          message: result.message || "Erro ao consultar a planilha. Verifique as permissões de acesso do Webhook ou da Planilha.",
+          message: result.message || "Erro ao consultar a planilha. Verifique as permissões de acesso do Webhook.",
         });
       }
     } catch (err: any) {
@@ -139,8 +277,8 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
     }
   };
 
-  // Import CSV File Directly
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Import Orders CSV File Directly
+  const handleOrdersFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -149,15 +287,13 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
       try {
         const text = evt.target?.result as string;
         const parsed = parseOrdersFromCSV(text);
-        if (parsed.length > 0) {
-          if (onImportOrders) {
-            const { merged, addedCount, updatedCount } = mergeOrders(orders, parsed);
-            onImportOrders(merged);
-            setSyncStatus({
-              type: "success",
-              message: `Arquivo importado com sucesso! ${parsed.length} pedidos processados (${addedCount} novos, ${updatedCount} atualizados).`,
-            });
-          }
+        if (parsed.length > 0 && onImportOrders) {
+          const { merged, addedCount, updatedCount } = mergeOrders(orders, parsed);
+          onImportOrders(merged);
+          setSyncStatus({
+            type: "success",
+            message: `Arquivo importado com sucesso! ${parsed.length} pedidos processados (${addedCount} novos, ${updatedCount} atualizados).`,
+          });
         } else {
           setSyncStatus({
             type: "error",
@@ -172,223 +308,84 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
       }
     };
     reader.readAsText(file, "UTF-8");
-    if (fileInputRef.current) fileInputRef.current.value = "";
+    if (orderFileInputRef.current) orderFileInputRef.current.value = "";
   };
 
-  const googleAppsScriptCode = `/**
- * FLORICULTURA PAPOULA - GOOGLE APPS SCRIPT WEB APP
- * Integração bidirecional com o Sistema Web
- * 
- * 1. doPost(e): Salva novos pedidos OU retorna pedidos se action='getOrders'
- * 2. doGet(e): Retorna todos os pedidos da planilha em JSON para o sistema web
- */
+  // Import Catalog CSV File Directly
+  const handleCatalogFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-function doPost(e) {
-  try {
-    var contents = e.postData ? e.postData.contents : "";
-    var data = {};
-    try {
-      data = contents ? JSON.parse(contents) : {};
-    } catch (parseErr) {
-      data = {};
-    }
-
-    // Se for uma requisicao de consulta / sincronizacao de pedidos
-    if (data.action === "getOrders" || data.action === "get_orders" || (e.parameter && e.parameter.action === "getOrders")) {
-      return doGet(e);
-    }
-    
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    
-    // Garante que a linha de cabeçalhos exista
-    if (sheet.getLastRow() === 0) {
-      sheet.appendRow([
-        "Numero Pedido",
-        "Data Criacao",
-        "Cliente / Remetente",
-        "WhatsApp Cliente",
-        "Aniversario Cliente",
-        "Produto / Arranjo",
-        "Categoria",
-        "Preco Referencia Item (R$)",
-        "Custo de Frete (R$)",
-        "Valor Total Estimado (R$)",
-        "Destinatario",
-        "Endereco de Entrega",
-        "Bairro",
-        "Cidade",
-        "Data de Entrega",
-        "Horario",
-        "Mensagem do Cartao",
-        "Forma Pagamento",
-        "Status Kanban"
-      ]);
-    }
-    
-    var orderNum = data.orderNumber || ("#PAP-" + Math.floor(1000 + Math.random() * 9000));
-    var createdAt = data.createdAt || new Date();
-    var customerName = data.senderName || data.customerName || "Cliente";
-    var customerPhone = data.senderPhone || data.customerPhone || "";
-    var customerBirthDate = data.customerBirthDate || "";
-    var productName = data.productName || "Arranjo de Flores";
-    var category = data.category || "Arranjos";
-    var refPrice = data.referencePrice || data.price || 0;
-    var freightFee = data.deliveryFee || data.freightFee || 0;
-    var totalPrice = data.total || data.totalPrice || (Number(refPrice) + Number(freightFee)) || 0;
-    var recipientName = data.recipientName || customerName;
-    var address = data.address || data.deliveryAddress || "";
-    var neighborhood = data.neighborhood || data.deliveryNeighborhood || "";
-    var city = data.city || data.deliveryCity || "Pirapora";
-    var deliveryDate = data.deliveryDate || "";
-    var timeSlot = data.timeSlot || "";
-    var cardMsg = data.cardMessage || "";
-    var payment = data.paymentMethod || "PIX";
-    var status = data.status || "pedido";
-    
-    sheet.appendRow([
-      orderNum,
-      createdAt,
-      customerName,
-      customerPhone,
-      customerBirthDate,
-      productName,
-      category,
-      refPrice,
-      freightFee,
-      totalPrice,
-      recipientName,
-      address,
-      neighborhood,
-      city,
-      deliveryDate,
-      timeSlot,
-      cardMsg,
-      payment,
-      status
-    ]);
-    
-    return ContentService.createTextOutput(JSON.stringify({ "result": "success", "orderNumber": orderNum }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({ "result": "error", "error": error.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}
-
-function doGet(e) {
-  try {
-    var sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-    var data = sheet.getDataRange().getValues();
-    
-    if (!data || data.length <= 1) {
-      return ContentService.createTextOutput(JSON.stringify({ "result": "success", "orders": [] }))
-        .setMimeType(ContentService.MimeType.JSON);
-    }
-    
-    var headers = data[0].map(function(h) { return String(h || "").trim().toLowerCase(); });
-    
-    function findCol(keywords) {
-      for (var k = 0; k < keywords.length; k++) {
-        for (var i = 0; i < headers.length; i++) {
-          if (headers[i].indexOf(keywords[k]) !== -1) return i;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const text = evt.target?.result as string;
+        const parsed = parseCatalogFromCSV(text);
+        if (parsed.length > 0 && onImportProducts) {
+          onImportProducts(parsed);
+          setSyncStatus({
+            type: "success",
+            message: `Catálogo importado com sucesso! ${parsed.length} produtos cadastrados no sistema.`,
+          });
+        } else {
+          setSyncStatus({
+            type: "error",
+            message: "Nenhum produto reconhecido no arquivo CSV de catálogo.",
+          });
         }
+      } catch (err: any) {
+        setSyncStatus({
+          type: "error",
+          message: "Erro ao ler arquivo de catálogo: " + err.message,
+        });
       }
-      return -1;
-    }
-    
-    var idxOrderNum = findCol(["numero", "pedido", "código", "codigo"]);
-    var idxDate = findCol(["data criacao", "data e hora", "data cadastro", "timestamp", "data"]);
-    var idxCustomer = findCol(["cliente", "remetente", "nome"]);
-    var idxPhone = findCol(["whatsapp", "telefone", "celular", "contato"]);
-    var idxBirth = findCol(["aniversario", "nascimento"]);
-    var idxProduct = findCol(["produto", "arranjo", "item"]);
-    var idxCategory = findCol(["categoria"]);
-    var idxRefPrice = findCol(["referencia", "preco do produto", "valor do produto", "preco"]);
-    var idxFreight = findCol(["frete", "taxa de frete", "custo de frete", "entrega"]);
-    var idxTotal = findCol(["total", "valor total", "total estimado"]);
-    var idxAddress = findCol(["endereco", "endereço", "rua"]);
-    var idxCity = findCol(["cidade", "municipio"]);
-    var idxDeliveryDate = findCol(["data de entrega", "horario", "entrega"]);
-    var idxCard = findCol(["mensagem", "cartao", "dedicatoria", "cartão"]);
-    var idxPayment = findCol(["pagamento", "forma"]);
-    var idxStatus = findCol(["status", "situacao", "etapa"]);
-    
-    var orders = [];
-    
-    for (var r = 1; r < data.length; r++) {
-      var row = data[r];
-      if (!row || row.every(function(cell) { return cell === "" || cell === null; })) continue;
-      
-      var orderNum = (idxOrderNum !== -1 && row[idxOrderNum]) ? String(row[idxOrderNum]).trim() : ("#PAP-" + (1000 + r));
-      var createdAt = (idxDate !== -1 && row[idxDate]) ? new Date(row[idxDate]).toISOString() : new Date().toISOString();
-      var customerName = (idxCustomer !== -1 && row[idxCustomer]) ? String(row[idxCustomer]).trim() : "Cliente";
-      var phone = (idxPhone !== -1 && row[idxPhone]) ? String(row[idxPhone]).trim() : "";
-      var birth = (idxBirth !== -1 && row[idxBirth]) ? String(row[idxBirth]).trim() : "";
-      var product = (idxProduct !== -1 && row[idxProduct]) ? String(row[idxProduct]).trim() : "Arranjo Especial";
-      var category = (idxCategory !== -1 && row[idxCategory]) ? String(row[idxCategory]).trim() : "Arranjos";
-      
-      var refVal = (idxRefPrice !== -1 && row[idxRefPrice]) ? parseFloat(String(row[idxRefPrice]).replace(",", ".")) : 0;
-      var freightVal = (idxFreight !== -1 && row[idxFreight]) ? parseFloat(String(row[idxFreight]).replace(",", ".")) : 0;
-      var totalVal = (idxTotal !== -1 && row[idxTotal]) ? parseFloat(String(row[idxTotal]).replace(",", ".")) : 0;
-      
-      if (isNaN(refVal)) refVal = 0;
-      if (isNaN(freightVal)) freightVal = 0;
-      if (isNaN(totalVal) || totalVal <= 0) totalVal = refVal + freightVal;
-      
-      var address = (idxAddress !== -1 && row[idxAddress]) ? String(row[idxAddress]).trim() : "";
-      var city = (idxCity !== -1 && row[idxCity]) ? String(row[idxCity]).trim() : "Pirapora";
-      var delDate = (idxDeliveryDate !== -1 && row[idxDeliveryDate]) ? String(row[idxDeliveryDate]).trim() : "Hoje";
-      var card = (idxCard !== -1 && row[idxCard]) ? String(row[idxCard]).trim() : "";
-      var payment = (idxPayment !== -1 && row[idxPayment]) ? String(row[idxPayment]).trim() : "PIX";
-      var statusRaw = (idxStatus !== -1 && row[idxStatus]) ? String(row[idxStatus]).toLowerCase().trim() : "pedido";
-      
-      var status = "pedido";
-      if (statusRaw.indexOf("prod") !== -1 || statusRaw.indexOf("conf") !== -1 || statusRaw.indexOf("pago") !== -1 || statusRaw.indexOf("bancada") !== -1) {
-        status = "confirmado";
-      } else if (statusRaw.indexOf("rota") !== -1 || statusRaw.indexOf("saiu") !== -1 || statusRaw.indexOf("transporte") !== -1 || statusRaw.indexOf("andamento") !== -1) {
-        status = "em_andamento";
-      } else if (statusRaw.indexOf("conc") !== -1 || statusRaw.indexOf("entr") !== -1 || statusRaw.indexOf("final") !== -1) {
-        status = "concluido";
+    };
+    reader.readAsText(file, "UTF-8");
+    if (catalogFileInputRef.current) catalogFileInputRef.current.value = "";
+  };
+
+  // Import Categories CSV File Directly
+  const handleCategoriesFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const text = evt.target?.result as string;
+        const parsed = parseCategoriesFromCSV(text);
+        if (parsed.length > 0 && onImportCategories) {
+          onImportCategories(parsed);
+          setSyncStatus({
+            type: "success",
+            message: `Categorias importadas com sucesso! ${parsed.length} categorias cadastradas.`,
+          });
+        } else {
+          setSyncStatus({
+            type: "error",
+            message: "Nenhuma categoria reconhecida no arquivo CSV.",
+          });
+        }
+      } catch (err: any) {
+        setSyncStatus({
+          type: "error",
+          message: "Erro ao ler arquivo de categorias: " + err.message,
+        });
       }
-      
-      orders.push({
-        id: "sheet-" + r + "-" + orderNum.replace(/[^a-zA-Z0-9]/g, ""),
-        orderNumber: orderNum,
-        createdAt: createdAt,
-        customerName: customerName,
-        customerPhone: phone,
-        customerBirthDate: birth,
-        productName: product,
-        category: category,
-        referencePrice: refVal,
-        freightFee: freightVal,
-        totalPrice: totalVal,
-        deliveryAddress: address,
-        deliveryCity: city,
-        deliveryDate: delDate,
-        cardMessage: card,
-        paymentMethod: payment,
-        status: status
-      });
-    }
-    
-    return ContentService.createTextOutput(JSON.stringify({ "result": "success", "orders": orders }))
-      .setMimeType(ContentService.MimeType.JSON);
-  } catch (error) {
-    return ContentService.createTextOutput(JSON.stringify({ "result": "error", "error": error.toString() }))
-      .setMimeType(ContentService.MimeType.JSON);
-  }
-}`;
+    };
+    reader.readAsText(file, "UTF-8");
+    if (categoryFileInputRef.current) categoryFileInputRef.current.value = "";
+  };
 
   const copyScript = () => {
-    navigator.clipboard.writeText(googleAppsScriptCode);
+    navigator.clipboard.writeText(GOOGLE_APPS_SCRIPT_MASTER_CODE);
     setCopiedScript(true);
     setTimeout(() => setCopiedScript(false), 2500);
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-fadeIn">
-      <div className="bg-white rounded-3xl p-6 max-w-2xl w-full shadow-2xl border border-stone-200 space-y-5 max-h-[90vh] overflow-y-auto">
+      <div className="bg-white rounded-3xl p-6 max-w-3xl w-full shadow-2xl border border-stone-200 space-y-5 max-h-[92vh] overflow-y-auto">
         
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-stone-200">
@@ -398,13 +395,13 @@ function doGet(e) {
             </div>
             <div>
               <h3 className="font-serif font-bold text-lg text-stone-900 flex items-center gap-2">
-                <span>Configurar Banco de Dados & Google Drive</span>
+                <span>Banco de Dados & Google Drive (Multi-Abas)</span>
                 <span className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
-                  Nuvem & Planilhas
+                  Pedidos • Catálogo • Categorias
                 </span>
               </h3>
               <p className="text-xs text-stone-500">
-                Sincronize pedidos, clientes e aniversários em duas vias (enviar e receber) com o Google Sheets no Google Drive.
+                Sincronize pedidos, catálogo de arranjos e categorias em abas automáticas na sua Planilha Google.
               </p>
             </div>
           </div>
@@ -434,112 +431,198 @@ function doGet(e) {
           </div>
         )}
 
-        {/* Actions: Live Sync & CSV Import */}
-        <div className="p-4 bg-gradient-to-r from-emerald-50 to-stone-50 rounded-2xl border border-emerald-200/80 space-y-3">
+        {/* Master Action: Sincronizar Tudo */}
+        <div className="p-4 bg-gradient-to-r from-emerald-900 to-[#114b30] text-white rounded-2xl shadow-md space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#114b30] uppercase tracking-wider flex items-center gap-1.5">
-              <RefreshCw className="w-4 h-4" />
-              <span>Sincronização Imediata com a Planilha</span>
-            </span>
+            <div className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-amber-300" />
+              <div>
+                <span className="font-bold text-sm block">Sincronização Completa da Floricultura na Planilha</span>
+                <span className="text-xs text-emerald-200 block">
+                  Salva e atualiza as 3 abas ("Pedidos", "Catalogo" e "Categorias") em um único clique.
+                </span>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {/* Direct Sync Button */}
+          <div className="flex flex-wrap gap-2.5 pt-1">
+            <button
+              type="button"
+              onClick={handleSyncAllToSheets}
+              disabled={isSyncingAll}
+              className="px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-emerald-950 rounded-xl font-bold text-xs flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50 transition-transform hover:scale-102"
+            >
+              <RefreshCw className={`w-4 h-4 ${isSyncingAll ? "animate-spin" : ""}`} />
+              <span>{isSyncingAll ? "Sincronizando Tudo..." : "💾 Salvar Tudo na Planilha (Pedidos, Catálogo e Categorias)"}</span>
+            </button>
+
             <button
               type="button"
               onClick={handleFetchFromSheets}
               disabled={isSyncing}
-              className="p-3 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-xs transition-all cursor-pointer disabled:opacity-50"
+              className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white border border-white/20 rounded-xl font-bold text-xs flex items-center gap-2 cursor-pointer disabled:opacity-50 transition-colors"
             >
-              <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin text-amber-300" : "text-amber-300"}`} />
-              <span>{isSyncing ? "Buscando na Planilha..." : "Puxar Pedidos da Planilha (Web)"}</span>
+              <RefreshCw className={`w-4 h-4 text-amber-300 ${isSyncing ? "animate-spin" : ""}`} />
+              <span>{isSyncing ? "Puxando Dados..." : "📥 Puxar Dados da Planilha (Web)"}</span>
             </button>
-
-            {/* Direct CSV Upload Button */}
-            <div>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv"
-                onChange={handleFileUpload}
-                className="hidden"
-                id="csv-file-upload"
-              />
-              <button
-                type="button"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full p-3 bg-white hover:bg-emerald-50 text-stone-800 hover:text-emerald-950 border border-stone-300 hover:border-emerald-400 rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-2xs transition-all cursor-pointer"
-              >
-                <Upload className="w-4 h-4 text-emerald-800" />
-                <span>Importar Arquivo (.CSV)</span>
-              </button>
-            </div>
           </div>
         </div>
 
-        {/* Quick Export Actions */}
-        <div className="space-y-2.5">
+        {/* Section: Sincronização e Exportação Específica por Módulo */}
+        <div className="space-y-3">
           <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider">
-            Exportar Dados para o Google Drive
+            Ações por Módulo (Catálogo, Categorias e Pedidos)
           </label>
 
-          <button
-            type="button"
-            onClick={() => downloadOfficialSpreadsheetTemplate()}
-            className="w-full p-3.5 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-2xl flex items-center justify-between shadow-md transition-all cursor-pointer group hover:scale-[1.01]"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-white/10 flex items-center justify-center text-amber-300 group-hover:scale-105 transition-transform">
-                <FileSpreadsheet className="w-6 h-6" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {/* Card 1: Catálogo de Produtos */}
+            <div className="p-3.5 bg-stone-50 rounded-2xl border border-stone-200 flex flex-col justify-between space-y-3">
+              <div className="flex items-center gap-2 text-stone-900 font-bold text-xs">
+                <Flower2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span className="truncate">Catálogo ({products.length} itens)</span>
               </div>
-              <div className="text-left">
-                <span className="font-bold text-xs sm:text-sm block">
-                  📥 Baixar Planilha Modelo Oficial (.CSV)
-                </span>
-                <span className="text-[11px] text-emerald-100/90 block">
-                  Com colunas de Produto, Custo de Frete, Ref. Arranjo e Total
-                </span>
+              <p className="text-[11px] text-stone-500">
+                Preços, fotos, descrições e itens inclusos na aba 'Catalogo'.
+              </p>
+              <div className="space-y-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={handlePushCatalogToSheets}
+                  disabled={isSyncingCatalog}
+                  className="w-full py-2 px-2.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-950 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5 text-emerald-800" />
+                  <span>{isSyncingCatalog ? "Salvando..." : "Salvar na Planilha"}</span>
+                </button>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleDownloadCatalog}
+                    className="flex-1 py-1.5 px-2 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                    title="Baixar Catálogo em CSV"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Baixar CSV</span>
+                  </button>
+                  <div>
+                    <input
+                      ref={catalogFileInputRef}
+                      type="file"
+                      accept=".csv"
+                      onChange={handleCatalogFileUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => catalogFileInputRef.current?.click()}
+                      className="p-1.5 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-[11px] font-bold flex items-center justify-center cursor-pointer"
+                      title="Importar CSV do Catálogo"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-emerald-700" />
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
-            <Download className="w-5 h-5 text-amber-300" />
-          </button>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-            <button
-              onClick={handleDownloadOrders}
-              className="p-3 bg-stone-50 hover:bg-emerald-50 border border-stone-200 hover:border-emerald-300 rounded-2xl flex items-center gap-3 transition-all cursor-pointer text-left group"
-            >
-              <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-900 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <FileSpreadsheet className="w-5 h-5" />
+            {/* Card 2: Categorias */}
+            <div className="p-3.5 bg-stone-50 rounded-2xl border border-stone-200 flex flex-col justify-between space-y-3">
+              <div className="flex items-center gap-2 text-stone-900 font-bold text-xs">
+                <FolderTree className="w-4 h-4 text-amber-700 shrink-0" />
+                <span className="truncate">Categorias ({categories.length})</span>
               </div>
-              <div className="flex-1 min-w-0">
-                <span className="font-bold text-xs text-stone-900 block truncate">
-                  Exportar Pedidos Atuais ({orders.length})
-                </span>
-                <span className="text-[11px] text-stone-500 block truncate">
-                  Com fretes e preços de referência
-                </span>
+              <p className="text-[11px] text-stone-500">
+                Nomes, emojis e descrições na aba 'Categorias'.
+              </p>
+              <div className="space-y-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={handlePushCategoriesToSheets}
+                  disabled={isSyncingCategories}
+                  className="w-full py-2 px-2.5 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
+                >
+                  <Send className="w-3.5 h-3.5 text-amber-800" />
+                  <span>{isSyncingCategories ? "Salvando..." : "Salvar na Planilha"}</span>
+                </button>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleDownloadCategories}
+                    className="flex-1 py-1.5 px-2 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                    title="Baixar Categorias em CSV"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Baixar CSV</span>
+                  </button>
+                  <div>
+                    <input
+                      ref={categoryFileInputRef}
+                      type="file"
+                      accept=".csv"
+                      onChange={handleCategoriesFileUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => categoryFileInputRef.current?.click()}
+                      className="p-1.5 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-[11px] font-bold flex items-center justify-center cursor-pointer"
+                      title="Importar CSV de Categorias"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-amber-700" />
+                    </button>
+                  </div>
+                </div>
               </div>
-              <Download className="w-4 h-4 text-emerald-700 shrink-0" />
-            </button>
+            </div>
 
-            <button
-              onClick={handleDownloadCustomers}
-              className="p-3 bg-stone-50 hover:bg-emerald-50 border border-stone-200 hover:border-emerald-300 rounded-2xl flex items-center gap-3 transition-all cursor-pointer text-left group"
-            >
-              <div className="w-9 h-9 rounded-xl bg-amber-100 text-amber-900 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform">
-                <Sparkles className="w-5 h-5" />
+            {/* Card 3: Pedidos */}
+            <div className="p-3.5 bg-stone-50 rounded-2xl border border-stone-200 flex flex-col justify-between space-y-3">
+              <div className="flex items-center gap-2 text-stone-900 font-bold text-xs">
+                <FileSpreadsheet className="w-4 h-4 text-emerald-800 shrink-0" />
+                <span className="truncate">Pedidos ({orders.length})</span>
               </div>
-              <div className="flex-1 min-w-0">
-                <span className="font-bold text-xs text-stone-900 block truncate">
-                  Exportar Clientes ({customers.length})
-                </span>
-                <span className="text-[11px] text-stone-500 block truncate">
-                  WhatsApp e datas de aniversários
-                </span>
+              <p className="text-[11px] text-stone-500">
+                Histórico com fretes, produtos e clientes na aba 'Pedidos'.
+              </p>
+              <div className="space-y-1.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => downloadOfficialSpreadsheetTemplate()}
+                  className="w-full py-2 px-2.5 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-300" />
+                  <span>Modelo Multi-Aba (.CSV)</span>
+                </button>
+                <div className="flex gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleDownloadOrders}
+                    className="flex-1 py-1.5 px-2 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer"
+                    title="Baixar Pedidos em CSV"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Baixar CSV</span>
+                  </button>
+                  <div>
+                    <input
+                      ref={orderFileInputRef}
+                      type="file"
+                      accept=".csv"
+                      onChange={handleOrdersFileUpload}
+                      className="hidden"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => orderFileInputRef.current?.click()}
+                      className="p-1.5 bg-white hover:bg-stone-100 text-stone-700 border border-stone-200 rounded-lg text-[11px] font-bold flex items-center justify-center cursor-pointer"
+                      title="Importar CSV de Pedidos"
+                    >
+                      <Upload className="w-3.5 h-3.5 text-emerald-700" />
+                    </button>
+                  </div>
+                </div>
               </div>
-              <Download className="w-4 h-4 text-amber-700 shrink-0" />
-            </button>
+            </div>
           </div>
         </div>
 
@@ -575,7 +658,7 @@ function doGet(e) {
 
             <div>
               <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
-                URL do Webhook do Google Apps Script (Envio e Leitura Automática):
+                URL do Webhook do Google Apps Script (Multi-Abas Automático):
               </label>
               <input
                 type="url"
@@ -585,7 +668,7 @@ function doGet(e) {
                 className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600/30 font-mono"
               />
               <span className="text-[11px] text-stone-500 block mt-1">
-                Cole a URL do Web App gerada no Google Apps Script (com <strong>doGet</strong> e <strong>doPost</strong>).
+                Cole a URL do Web App gerada no Google Apps Script para sincronizar automaticamente as abas <strong>Pedidos</strong>, <strong>Catalogo</strong> e <strong>Categorias</strong>.
               </span>
             </div>
 
@@ -600,9 +683,6 @@ function doGet(e) {
                 placeholder="https://docs.google.com/spreadsheets/d/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms/edit"
                 className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600/30 font-mono"
               />
-              <span className="text-[11px] text-stone-500 block mt-1">
-                Permite puxar pedidos diretamente da planilha mesmo sem o Apps Script (compartilhe como <em>"Qualquer pessoa com o link pode ler"</em>).
-              </span>
             </div>
 
             {/* Sincronização Automática ao Entrar */}
@@ -617,7 +697,7 @@ function doGet(e) {
                 <span>Sincronização Automática ao Entrar no Sistema e em Segundo Plano</span>
               </label>
               <p className="text-[11px] text-emerald-900 leading-relaxed pl-6">
-                Quando ativado, o sistema <strong>puxa e atualiza todos os pedidos da planilha automaticamente sempre que você abrir ou recarregar a página</strong>, além de checar atualizações em segundo plano a cada 2 minutos (sem você precisar ficar clicando toda hora).
+                Quando ativado, o sistema <strong>puxa e atualiza os pedidos e catálogo da planilha automaticamente sempre que você abrir a página</strong>, sem precisar ficar clicando.
               </p>
             </div>
 
@@ -626,7 +706,7 @@ function doGet(e) {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-bold text-stone-800 flex items-center gap-1.5">
                   <Info className="w-3.5 h-3.5 text-emerald-800" />
-                  <span>Código do Script para o Google Sheets (doGet + doPost):</span>
+                  <span>Código Oficial Multi-Abas para o Google Apps Script:</span>
                 </span>
                 <button
                   type="button"
@@ -648,19 +728,17 @@ function doGet(e) {
               </div>
 
               <div className="bg-amber-50/80 p-2.5 rounded-xl border border-amber-200 text-[11px] text-amber-950 space-y-1">
-                <p className="font-bold">⚠️ Como configurar no Google Sheets para puxar os dados corretamente:</p>
+                <p className="font-bold">⚠️ Como atualizar o script na sua planilha Google:</p>
                 <ol className="list-decimal pl-4 space-y-0.5 text-amber-900">
                   <li>No Google Sheets, clique em <strong>Extensões &gt; Apps Script</strong>.</li>
-                  <li>Cole o código abaixo substituindo o conteúdo anterior e clique em <strong>Salvar (Ctrl+S)</strong>.</li>
-                  <li>Clique no botão azul <strong>Implantar &gt; Nova implantação</strong>.</li>
-                  <li>Selecione o tipo <strong>App da Web</strong>.</li>
-                  <li>Em <em>"Quem pode acessar"</em>, selecione <strong>Qualquer pessoa (Anyone)</strong>.</li>
-                  <li>Copie a URL da Web App gerada e cole no campo acima!</li>
+                  <li>Substitua o código atual pelo código abaixo e clique em <strong>Salvar (Ctrl+S)</strong>.</li>
+                  <li>Clique em <strong>Implantar &gt; Nova implantação</strong> (App da Web, Acesso: <strong>Qualquer pessoa / Anyone</strong>).</li>
+                  <li>Copie a URL gerada e cole no campo acima!</li>
                 </ol>
               </div>
 
-              <pre className="text-[10px] bg-stone-900 text-stone-200 p-2.5 rounded-xl font-mono overflow-x-auto max-h-36">
-                {googleAppsScriptCode}
+              <pre className="text-[10px] bg-stone-900 text-stone-200 p-2.5 rounded-xl font-mono overflow-x-auto max-h-40">
+                {GOOGLE_APPS_SCRIPT_MASTER_CODE}
               </pre>
             </div>
           </div>
