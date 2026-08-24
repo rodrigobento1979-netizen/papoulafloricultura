@@ -23,11 +23,17 @@ import {
   Calendar,
   ChevronRight,
   Database,
-  Trash2
+  Trash2,
+  DollarSign,
+  Download,
+  CalendarDays
 } from "lucide-react";
 import { KanbanOrder, KanbanOrderStatus, Product } from "../types";
 import { EditOrderModal } from "./EditOrderModal";
 import { WhatsAppOrderModal } from "./WhatsAppOrderModal";
+import { exportOrdersToCSV, downloadCSV } from "../utils/googleDriveSync";
+
+type DateFilterType = "all" | "today" | "yesterday" | "last7days" | "this_month" | "custom";
 
 interface KanbanBoardProps {
   orders: KanbanOrder[];
@@ -98,6 +104,12 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   const [dragOverColumn, setDragOverColumn] = useState<KanbanOrderStatus | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [cityFilter, setCityFilter] = useState<"todas" | "Pirapora" | "Buritizeiro">("todas");
+  const [statusFilter, setStatusFilter] = useState<"all" | KanbanOrderStatus>("all");
+
+  // Date filter state
+  const [dateFilter, setDateFilter] = useState<DateFilterType>("all");
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
 
   // Modals state
   const [editingOrder, setEditingOrder] = useState<KanbanOrder | null>(null);
@@ -177,9 +189,62 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     setConcludingOrder(null);
   };
 
+  // Date filter evaluation
+  const isOrderMatchingDate = (order: KanbanOrder): boolean => {
+    if (dateFilter === "all") return true;
+
+    const rawDate = order.createdAt;
+    if (!rawDate) return true;
+
+    const orderTime = new Date(rawDate).getTime();
+    if (isNaN(orderTime)) return true;
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+
+    if (dateFilter === "today") {
+      return orderTime >= startOfToday && orderTime <= endOfToday;
+    }
+
+    if (dateFilter === "yesterday") {
+      const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+      const endOfYesterday = endOfToday - 24 * 60 * 60 * 1000;
+      return orderTime >= startOfYesterday && orderTime <= endOfYesterday;
+    }
+
+    if (dateFilter === "last7days") {
+      const start7DaysAgo = startOfToday - 7 * 24 * 60 * 60 * 1000;
+      return orderTime >= start7DaysAgo && orderTime <= endOfToday;
+    }
+
+    if (dateFilter === "this_month") {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+      return orderTime >= startOfMonth && orderTime <= endOfMonth;
+    }
+
+    if (dateFilter === "custom") {
+      if (customStartDate) {
+        const customStart = new Date(`${customStartDate}T00:00:00`).getTime();
+        if (orderTime < customStart) return false;
+      }
+      if (customEndDate) {
+        const customEnd = new Date(`${customEndDate}T23:59:59`).getTime();
+        if (orderTime > customEnd) return false;
+      }
+      return true;
+    }
+
+    return true;
+  };
+
   // Filter orders
   const filteredOrders = orders.filter((o) => {
     if (cityFilter !== "todas" && o.deliveryCity !== cityFilter) return false;
+    if (statusFilter !== "all" && o.status !== statusFilter) return false;
+    if (!isOrderMatchingDate(o)) return false;
+
     if (searchTerm.trim()) {
       const q = searchTerm.toLowerCase();
       const matchNum = o.orderNumber?.toLowerCase().includes(q);
@@ -187,127 +252,342 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
       const matchPhone = o.customerPhone?.includes(q);
       const matchProd = o.productName?.toLowerCase().includes(q);
       const matchCity = o.deliveryCity?.toLowerCase().includes(q);
-      if (!matchNum && !matchCust && !matchPhone && !matchProd && !matchCity) return false;
+      const matchAddr = o.deliveryAddress?.toLowerCase().includes(q);
+      const matchMsg = o.cardMessage?.toLowerCase().includes(q);
+      if (!matchNum && !matchCust && !matchPhone && !matchProd && !matchCity && !matchAddr && !matchMsg) return false;
     }
     return true;
   });
 
+  // Calculate Metrics for Current Filter
+  const totalFilteredRevenue = filteredOrders.reduce((acc, order) => acc + (order.totalPrice || 0), 0);
+  const pendingOrdersCount = filteredOrders.filter((o) => o.status !== "concluido").length;
+  const completedOrdersCount = filteredOrders.filter((o) => o.status === "concluido").length;
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+  const todayOrdersCount = orders.filter((o) => {
+    if (!o.createdAt) return false;
+    const t = new Date(o.createdAt).getTime();
+    return !isNaN(t) && t >= startOfToday && t <= endOfToday;
+  }).length;
+
+  const handleExportFilteredCSV = () => {
+    const csv = exportOrdersToCSV(filteredOrders);
+    const date = new Date().toISOString().split("T")[0];
+    downloadCSV(`pedidos_papoula_filtrados_${date}.csv`, csv);
+  };
+
   return (
-    <div className="flex-1 flex flex-col h-full space-y-3.5">
+    <div className="flex-1 flex flex-col h-full space-y-4">
       
-      {/* Top Filter & Actions Bar */}
-      <div className="bg-white rounded-2xl p-3.5 sm:p-4 border border-stone-200/90 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-emerald-100 text-[#114b30] flex items-center justify-center font-bold shrink-0">
-            <Kanban className="w-5 h-5" />
-          </div>
+      {/* KPI METRICS OVERVIEW */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-stone-200/90 shadow-2xs flex items-center justify-between">
           <div>
-            <h2 className="font-serif font-bold text-base sm:text-lg text-stone-900 flex items-center gap-2">
-              <span>Gestão de Pedidos & Kanban</span>
-              <span className="text-xs bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
-                {orders.length} pedidos
-              </span>
-            </h2>
-            <p className="text-xs text-stone-500">
-              Controle rápido de produção com suporte a pedidos do WhatsApp e banco em nuvem.
-            </p>
+            <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider block">
+              Total de Pedidos
+            </span>
+            <span className="text-xl sm:text-2xl font-serif font-extrabold text-[#114b30]">
+              {filteredOrders.length}
+            </span>
+            <span className="text-[10px] text-stone-400 block mt-0.5">
+              {orders.length} cadastrados no total
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-[#114b30] flex items-center justify-center font-bold">
+            <ShoppingBag className="w-5 h-5" />
           </div>
         </div>
 
-        {/* Action Buttons: New WhatsApp Order, Database config, View toggles */}
-        <div className="flex items-center gap-2 flex-wrap">
-          
-          {/* Create WhatsApp Order button */}
-          <button
-            onClick={() => setIsWhatsAppModalOpen(true)}
-            className="px-3.5 py-2 bg-[#25D366] hover:bg-[#1ebd59] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102"
-            title="Lançar Pedido Recebido pelo WhatsApp"
-          >
-            <MessageCircle className="w-4 h-4" />
-            <span>+ Pedido WhatsApp</span>
-          </button>
+        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-stone-200/90 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider block">
+              Faturamento no Filtro
+            </span>
+            <span className="text-xl sm:text-2xl font-serif font-extrabold text-emerald-700">
+              R$ {totalFilteredRevenue.toFixed(2)}
+            </span>
+            <span className="text-[10px] text-stone-400 block mt-0.5">
+              Média R$ {(filteredOrders.length > 0 ? totalFilteredRevenue / filteredOrders.length : 0).toFixed(2)}/ped
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-700 flex items-center justify-center font-bold">
+            <DollarSign className="w-5 h-5" />
+          </div>
+        </div>
 
-          {/* Google Drive / DB button */}
-          {onOpenDatabaseSettings && (
-            <button
-              onClick={onOpenDatabaseSettings}
-              className="px-3 py-2 bg-stone-100 hover:bg-emerald-50 text-stone-700 hover:text-emerald-900 border border-stone-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Configurar Google Drive & Planilhas"
-            >
-              <Database className="w-3.5 h-3.5 text-emerald-800" />
-              <span className="hidden sm:inline">Google Drive</span>
-            </button>
-          )}
+        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-stone-200/90 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider block">
+              Pedidos Criados Hoje
+            </span>
+            <span className="text-xl sm:text-2xl font-serif font-extrabold text-amber-600">
+              {todayOrdersCount}
+            </span>
+            <span className="text-[10px] text-stone-400 block mt-0.5">
+              {pendingOrdersCount} pendentes de entrega
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
+            <Clock className="w-5 h-5" />
+          </div>
+        </div>
 
-          {/* View mode toggle (Kanban vs Table) */}
-          <div className="flex items-center bg-stone-100 p-1 rounded-xl border border-stone-200 text-xs">
-            <button
-              onClick={() => setViewMode("kanban")}
-              className={`p-1.5 rounded-lg flex items-center gap-1 font-semibold transition-all cursor-pointer ${
-                viewMode === "kanban"
-                  ? "bg-white text-emerald-950 shadow-xs"
-                  : "text-stone-500 hover:text-stone-800"
-              }`}
-              title="Visualização em Colunas Kanban"
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Colunas</span>
-            </button>
-            <button
-              onClick={() => setViewMode("table")}
-              className={`p-1.5 rounded-lg flex items-center gap-1 font-semibold transition-all cursor-pointer ${
-                viewMode === "table"
-                  ? "bg-white text-emerald-950 shadow-xs"
-                  : "text-stone-500 hover:text-stone-800"
-              }`}
-              title="Visualização em Lista / Tabela Compacta"
-            >
-              <List className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Lista</span>
-            </button>
+        <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-stone-200/90 shadow-2xs flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider block">
+              Concluídos & Entregues
+            </span>
+            <span className="text-xl sm:text-2xl font-serif font-extrabold text-emerald-800">
+              {completedOrdersCount}
+            </span>
+            <span className="text-[10px] text-emerald-600 font-semibold block mt-0.5">
+              Taxa de conclusão: {filteredOrders.length > 0 ? Math.round((completedOrdersCount / filteredOrders.length) * 100) : 0}%
+            </span>
+          </div>
+          <div className="w-10 h-10 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
+            <CheckCircle2 className="w-5 h-5" />
+          </div>
+        </div>
+      </div>
+
+      {/* FILTER CONTROLS & ACTIONS BAR */}
+      <div className="bg-white rounded-2xl p-4 border border-stone-200/90 shadow-xs space-y-3.5">
+        
+        {/* Row 1: Title + Action buttons */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-stone-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#114b30] text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
+              <ShoppingBag className="w-5 h-5 text-amber-300" />
+            </div>
+            <div>
+              <h2 className="font-serif font-bold text-base sm:text-lg text-stone-900 flex items-center gap-2">
+                <span>Painel de Pedidos & Produção</span>
+                <span className="text-xs bg-emerald-100 text-emerald-950 font-bold px-2.5 py-0.5 rounded-full">
+                  {filteredOrders.length} {filteredOrders.length === 1 ? "pedido" : "pedidos"}
+                </span>
+              </h2>
+              <p className="text-xs text-stone-500">
+                Visualize todos os pedidos, filtre por data e acompanhe o status de montagem e entrega.
+              </p>
+            </div>
           </div>
 
-          {/* Search box */}
-          <div className="relative text-xs">
-            <Search className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Buscar pedido, cliente..."
-              className="pl-8 pr-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-600 text-xs w-36 sm:w-44"
-            />
-          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Create WhatsApp Order button */}
+            <button
+              onClick={() => setIsWhatsAppModalOpen(true)}
+              className="px-3.5 py-2 bg-[#25D366] hover:bg-[#1ebd59] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102"
+              title="Lançar Pedido Recebido pelo WhatsApp"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>+ Novo Pedido</span>
+            </button>
 
-          {/* City filter */}
-          <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl text-xs">
-            {(["todas", "Pirapora", "Buritizeiro"] as const).map((city) => (
+            {/* Export CSV button */}
+            <button
+              onClick={handleExportFilteredCSV}
+              className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Baixar lista filtrada em planilha Excel / CSV"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-700" />
+              <span className="hidden sm:inline">Exportar CSV</span>
+            </button>
+
+            {/* Google Drive button */}
+            {onOpenDatabaseSettings && (
               <button
-                key={city}
-                onClick={() => setCityFilter(city)}
-                className={`px-2 py-1 rounded-lg font-semibold text-[11px] transition-colors cursor-pointer ${
-                  cityFilter === city
+                onClick={onOpenDatabaseSettings}
+                className="px-3 py-2 bg-stone-100 hover:bg-emerald-50 text-stone-700 hover:text-emerald-900 border border-stone-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Configurar Google Drive & Planilhas"
+              >
+                <Database className="w-3.5 h-3.5 text-emerald-800" />
+                <span className="hidden sm:inline">Google Drive</span>
+              </button>
+            )}
+
+            {/* View mode toggle (Kanban vs Table) */}
+            <div className="flex items-center bg-stone-100 p-1 rounded-xl border border-stone-200 text-xs">
+              <button
+                onClick={() => setViewMode("kanban")}
+                className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-semibold transition-all cursor-pointer ${
+                  viewMode === "kanban"
                     ? "bg-[#114b30] text-white shadow-xs"
                     : "text-stone-600 hover:text-stone-900"
                 }`}
+                title="Visualização em Colunas Kanban"
               >
-                {city === "todas" ? "Todas" : city}
+                <LayoutGrid className="w-3.5 h-3.5" />
+                <span>Colunas</span>
+              </button>
+              <button
+                onClick={() => setViewMode("table")}
+                className={`px-2.5 py-1.5 rounded-lg flex items-center gap-1 font-semibold transition-all cursor-pointer ${
+                  viewMode === "table"
+                    ? "bg-[#114b30] text-white shadow-xs"
+                    : "text-stone-600 hover:text-stone-900"
+                }`}
+                title="Visualização em Lista / Tabela Completa"
+              >
+                <List className="w-3.5 h-3.5" />
+                <span>Lista Detalhada</span>
+              </button>
+            </div>
+
+            {/* Clear orders button */}
+            {onClearOrders && orders.length > 0 && (
+              <button
+                onClick={onClearOrders}
+                className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                title="Limpar todos os pedidos"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Limpar</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Date Filters & Search */}
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          
+          {/* Date Filter Pills */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold text-stone-500 flex items-center gap-1 mr-1">
+              <Calendar className="w-3.5 h-3.5 text-[#114b30]" />
+              <span>Filtrar por Data:</span>
+            </span>
+
+            {[
+              { id: "all", label: "Todas as Datas" },
+              { id: "today", label: "Hoje" },
+              { id: "yesterday", label: "Ontem" },
+              { id: "last7days", label: "Últimos 7 dias" },
+              { id: "this_month", label: "Este Mês" },
+              { id: "custom", label: "Personalizado" },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setDateFilter(tab.id as DateFilterType)}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                  dateFilter === tab.id
+                    ? "bg-[#114b30] text-white shadow-2xs"
+                    : "bg-stone-100 hover:bg-stone-200 text-stone-700"
+                }`}
+              >
+                {tab.label}
               </button>
             ))}
           </div>
 
-          {/* Clear orders button if orders exist */}
-          {onClearOrders && orders.length > 0 && (
-            <button
-              onClick={onClearOrders}
-              className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
-              title="Limpar todos os pedidos do Kanban"
-            >
-              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-              <span>Limpar</span>
-            </button>
-          )}
+          {/* Search box & City Filter */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative text-xs flex-1 sm:w-64">
+              <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar cliente, número, arranjo..."
+                className="w-full pl-8 pr-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-600 text-xs"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* City filter */}
+            <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl text-xs">
+              {(["todas", "Pirapora", "Buritizeiro"] as const).map((city) => (
+                <button
+                  key={city}
+                  onClick={() => setCityFilter(city)}
+                  className={`px-2.5 py-1 rounded-lg font-semibold text-xs transition-colors cursor-pointer ${
+                    cityFilter === city
+                      ? "bg-white text-emerald-950 font-bold shadow-2xs"
+                      : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  {city === "todas" ? "Todas Cidades" : city}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Optional Row 3: Custom Date Range Pickers */}
+        {dateFilter === "custom" && (
+          <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 flex flex-wrap items-center gap-4 text-xs animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-emerald-950">De:</span>
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="px-2.5 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-medium focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-emerald-950">Até:</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="px-2.5 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-medium focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+              />
+            </div>
+            {(customStartDate || customEndDate) && (
+              <button
+                onClick={() => {
+                  setCustomStartDate("");
+                  setCustomEndDate("");
+                }}
+                className="text-[11px] text-emerald-800 underline font-bold hover:text-emerald-950 cursor-pointer"
+              >
+                Limpar datas
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Row 4: Status Quick Filter */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+          <button
+            onClick={() => setStatusFilter("all")}
+            className={`px-3 py-1 rounded-lg font-bold text-xs whitespace-nowrap transition-colors cursor-pointer ${
+              statusFilter === "all"
+                ? "bg-stone-800 text-white"
+                : "bg-stone-100 text-stone-600 hover:bg-stone-200"
+            }`}
+          >
+            Todos os Status ({orders.length})
+          </button>
+          {COLUMNS.map((col) => {
+            const count = orders.filter((o) => o.status === col.id).length;
+            const isSelected = statusFilter === col.id;
+            return (
+              <button
+                key={col.id}
+                onClick={() => setStatusFilter(isSelected ? "all" : col.id)}
+                className={`px-3 py-1 rounded-lg font-bold text-xs whitespace-nowrap flex items-center gap-1.5 transition-colors cursor-pointer ${
+                  isSelected
+                    ? "bg-[#114b30] text-white shadow-2xs"
+                    : `${col.badgeBg} ${col.badgeText} hover:opacity-80`
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${col.dot}`} />
+                <span>{col.title.replace(/^\d+\.\s*/, "")}</span>
+                <span className="opacity-80">({count})</span>
+              </button>
+            );
+          })}
         </div>
 
       </div>
@@ -499,6 +779,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               <thead className="bg-stone-100 text-stone-700 font-bold uppercase text-[10px] tracking-wider border-b border-stone-200">
                 <tr>
                   <th className="py-3 px-3.5">Nº Pedido</th>
+                  <th className="py-3 px-3.5">Data / Hora</th>
                   <th className="py-3 px-3.5">Cliente</th>
                   <th className="py-3 px-3.5">WhatsApp</th>
                   <th className="py-3 px-3.5">Aniversário</th>
@@ -512,18 +793,30 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               <tbody className="divide-y divide-stone-200">
                 {filteredOrders.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="py-8 text-center text-stone-400">
+                    <td colSpan={10} className="py-8 text-center text-stone-400">
                       Nenhum pedido encontrado com os filtros atuais.
                     </td>
                   </tr>
                 ) : (
                   filteredOrders.map((order) => {
                     const statusObj = COLUMNS.find((c) => c.id === order.status) || COLUMNS[0];
+                    const formattedDate = order.createdAt
+                      ? new Date(order.createdAt).toLocaleDateString("pt-BR", {
+                          day: "2-digit",
+                          month: "2-digit",
+                          year: "2-digit",
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })
+                      : "—";
 
                     return (
                       <tr key={order.id} className="hover:bg-stone-50 transition-colors">
                         <td className="py-2.5 px-3.5 font-mono font-bold text-emerald-950">
                           {order.orderNumber}
+                        </td>
+                        <td className="py-2.5 px-3.5 text-stone-500 font-medium whitespace-nowrap text-[11px]">
+                          {formattedDate}
                         </td>
                         <td className="py-2.5 px-3.5 font-semibold text-stone-900">
                           {order.customerName}

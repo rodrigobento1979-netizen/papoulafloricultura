@@ -46,7 +46,7 @@ import {
 } from "lucide-react";
 import { Product, Category, Customer, KanbanOrder, KanbanOrderStatus, GoogleDriveConfig, StoreConfig } from "../types";
 import { PapoulaLogo } from "./PapoulaLogo";
-import { KanbanBoard } from "./KanbanBoard";
+import { OrdersList } from "./OrdersList";
 import { GoogleDriveSettingsModal } from "./GoogleDriveSettingsModal";
 import { AICatalogExtractorModal } from "./AICatalogExtractorModal";
 import { ImageUploadInput } from "./ImageUploadInput";
@@ -153,7 +153,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [loginError, setLoginError] = useState("");
 
   // Lateral Menu View State
-  const [activeMenu, setActiveMenu] = useState<"products" | "categories" | "customers" | "settings" | "database" | "dashboard">("products");
+  const [activeMenu, setActiveMenu] = useState<"orders" | "products" | "categories" | "customers" | "settings" | "database" | "dashboard">("orders");
   const [feedbackMessage, setFeedbackMessage] = useState("");
 
   // Google Drive Modal State
@@ -191,6 +191,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [productName, setProductName] = useState("");
   const [productCategory, setProductCategory] = useState(categories[0]?.id || "buques");
   const [price, setPrice] = useState("");
+  const [referencePrice, setReferencePrice] = useState("");
   const [originalPrice, setOriginalPrice] = useState("");
   const [isPriceOnDemand, setIsPriceOnDemand] = useState(false);
   const [orderCountInput, setOrderCountInput] = useState("12");
@@ -225,6 +226,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editProdName, setEditProdName] = useState("");
   const [editProdCategory, setEditProdCategory] = useState("");
   const [editProdPrice, setEditProdPrice] = useState("");
+  const [editProdReferencePrice, setEditProdReferencePrice] = useState("");
   const [editProdOriginalPrice, setEditProdOriginalPrice] = useState("");
   const [editProdIsPriceOnDemand, setEditProdIsPriceOnDemand] = useState(false);
   const [editProdImageUrl, setEditProdImageUrl] = useState("");
@@ -301,6 +303,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     let numPrice = 0;
+    let numRefPrice: number | undefined;
+
     if (!isPriceOnDemand) {
       if (!price.trim()) {
         alert("Por favor, preencha o preço do produto ou marque a opção 'Sob Consulta'.");
@@ -310,6 +314,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (isNaN(numPrice) || numPrice <= 0) {
         alert("Informe um preço válido.");
         return;
+      }
+      numRefPrice = numPrice;
+    } else {
+      if (referencePrice.trim()) {
+        const parsedRef = parseFloat(referencePrice.replace(",", "."));
+        if (!isNaN(parsedRef) && parsedRef > 0) {
+          numRefPrice = parsedRef;
+        }
       }
     }
 
@@ -331,6 +343,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       occasion: ["aniversario", "romance", "agradecimento"],
       flowerType: ["rosas", "girassol", "lirios"],
       price: numPrice,
+      referencePrice: numRefPrice,
       originalPrice: numOriginalPrice,
       isPriceOnDemand,
       orderCount: orderCnt,
@@ -350,6 +363,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onAddProduct(newProd);
     setProductName("");
     setPrice("");
+    setReferencePrice("");
     setOriginalPrice("");
     setIsPriceOnDemand(false);
     setDescription("");
@@ -370,6 +384,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditProdName(prod.name);
     setEditProdCategory(prod.category);
     setEditProdPrice(prod.price > 0 ? prod.price.toString().replace(".", ",") : "");
+    setEditProdReferencePrice(prod.referencePrice ? prod.referencePrice.toString().replace(".", ",") : (prod.price > 0 ? prod.price.toString().replace(".", ",") : ""));
     setEditProdOriginalPrice(prod.originalPrice ? prod.originalPrice.toString().replace(".", ",") : "");
     setEditProdIsPriceOnDemand(Boolean(prod.isPriceOnDemand));
     setEditProdImageUrl(prod.imageUrl || PRESET_FLOWER_IMAGES[0].url);
@@ -387,6 +402,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     let numPrice = 0;
+    let numRefPrice: number | undefined;
+
     if (!editProdIsPriceOnDemand) {
       if (!editProdPrice.trim()) {
         alert("Informe o preço de venda ou marque 'Sob Consulta'.");
@@ -396,6 +413,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       if (isNaN(numPrice) || numPrice <= 0) {
         alert("Preço inválido.");
         return;
+      }
+      numRefPrice = numPrice;
+    } else {
+      if (editProdReferencePrice.trim()) {
+        const parsedRef = parseFloat(editProdReferencePrice.replace(",", "."));
+        if (!isNaN(parsedRef) && parsedRef > 0) {
+          numRefPrice = parsedRef;
+        }
       }
     }
 
@@ -412,6 +437,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       name: editProdName.trim(),
       category: editProdCategory,
       price: numPrice,
+      referencePrice: numRefPrice,
       originalPrice: origPrice,
       isPriceOnDemand: editProdIsPriceOnDemand,
       imageUrl: editProdImageUrl.trim() || editingProduct.imageUrl,
@@ -704,6 +730,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               <button
+                onClick={() => setActiveMenu("orders")}
+                className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap text-left ${
+                  activeMenu === "orders" || (activeMenu as string) === "kanban"
+                    ? "bg-amber-400 text-emerald-950 font-bold shadow-xs"
+                    : "text-emerald-100 hover:bg-white/10 hover:text-white"
+                }`}
+              >
+                <Package className="w-4 h-4 shrink-0" />
+                <span>Lista de Pedidos</span>
+                <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full font-bold ${
+                  activeMenu === "orders" || (activeMenu as string) === "kanban" ? "bg-emerald-900 text-white" : "bg-white/15 text-white"
+                }`}>
+                  {kanbanOrders.length}
+                </span>
+              </button>
+
+              <button
                 onClick={() => setActiveMenu("products")}
                 className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap text-left ${
                   activeMenu === "products"
@@ -837,9 +880,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
-            {/* TAB 1: KANBAN DE PEDIDOS (DRAGGABLE + LIST VIEW + EDIT MODAL) */}
-            {activeMenu === "kanban" && (
-              <KanbanBoard
+            {/* TAB 1: LISTAGEM GERAL DE PEDIDOS DA PLANILHA (CONTAGEM & FILTRO POR DATA) */}
+            {(activeMenu === "orders" || (activeMenu as string) === "kanban") && (
+              <OrdersList
                 orders={kanbanOrders}
                 products={products}
                 onUpdateOrderStatus={onUpdateOrderStatus}
@@ -1465,19 +1508,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
 
                       {/* Checkbox: Gerar sem preço / Sob Consulta */}
-                      <div className="sm:col-span-3 bg-amber-50/70 p-3 rounded-xl border border-amber-200 flex items-center justify-between">
-                        <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold text-stone-800">
-                          <input
-                            type="checkbox"
-                            checked={isPriceOnDemand}
-                            onChange={(e) => setIsPriceOnDemand(e.target.checked)}
-                            className="w-4 h-4 text-emerald-800 rounded border-stone-300 focus:ring-emerald-500"
-                          />
-                          <span>Gerar item sem preço fixo ("Sob Consulta" via WhatsApp)</span>
-                        </label>
-                        <span className="text-[11px] text-stone-500 hidden sm:inline">
-                          Ideal para arranjos personalizados, flores sazonais e coroas.
-                        </span>
+                      <div className="sm:col-span-3 bg-amber-50/70 p-3 rounded-xl border border-amber-200 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold text-stone-800">
+                            <input
+                              type="checkbox"
+                              checked={isPriceOnDemand}
+                              onChange={(e) => setIsPriceOnDemand(e.target.checked)}
+                              className="w-4 h-4 text-emerald-800 rounded border-stone-300 focus:ring-emerald-500"
+                            />
+                            <span>Marcar como "Sob Consulta" (WhatsApp / Sem preço público no catálogo)</span>
+                          </label>
+                          <span className="text-[11px] text-stone-500 hidden sm:inline">
+                            Oculta o preço para o cliente na vitrine
+                          </span>
+                        </div>
+
+                        {/* Campo de Preço de Referência Interno quando Sob Consulta */}
+                        {isPriceOnDemand && (
+                          <div className="pt-2 border-t border-amber-200/80 flex flex-col sm:flex-row sm:items-center gap-3">
+                            <div className="w-full sm:w-64">
+                              <label className="block text-[11px] font-bold text-amber-950 uppercase mb-0.5">
+                                Preço de Referência Interno (R$)
+                              </label>
+                              <input
+                                type="text"
+                                value={referencePrice}
+                                onChange={(e) => setReferencePrice(e.target.value)}
+                                placeholder="Ex: 180,00"
+                                className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-emerald-950 focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+                              />
+                            </div>
+                            <p className="text-[11px] text-amber-900 leading-snug flex-1">
+                              💡 <strong>Uso interno:</strong> Usado para estimar o total de vendas, relatórios e pedidos. <em>Não será mostrado ao cliente no catálogo</em>.
+                            </p>
+                          </div>
+                        )}
                       </div>
 
                       {!isPriceOnDemand && (
@@ -1632,9 +1698,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                             <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-2 sm:pt-0">
                               {prod.isPriceOnDemand ? (
-                                <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
-                                  Sob Consulta
-                                </span>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xs font-bold text-emerald-800 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200">
+                                    Sob Consulta
+                                  </span>
+                                  {prod.referencePrice && prod.referencePrice > 0 ? (
+                                    <span className="text-xs font-bold text-stone-600 bg-stone-100 px-2 py-1 rounded-lg border border-stone-200" title="Preço de referência interno (oculto para clientes)">
+                                      Ref: R$ {prod.referencePrice.toFixed(2)}
+                                    </span>
+                                  ) : null}
+                                </div>
                               ) : editingPriceId === prod.id ? (
                                 <div className="flex items-center gap-1.5">
                                   <span className="text-xs font-bold">R$</span>
@@ -2695,19 +2768,41 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
 
                 {/* Checkbox Sob Consulta */}
-                <div className="sm:col-span-3 bg-amber-50/70 p-3 rounded-xl border border-amber-200 flex items-center justify-between">
-                  <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold text-stone-800">
-                    <input
-                      type="checkbox"
-                      checked={editProdIsPriceOnDemand}
-                      onChange={(e) => setEditProdIsPriceOnDemand(e.target.checked)}
-                      className="w-4 h-4 text-emerald-800 rounded border-stone-300 focus:ring-emerald-500"
-                    />
-                    <span>Preço "Sob Consulta" (WhatsApp)</span>
-                  </label>
-                  <span className="text-[11px] text-stone-500 hidden sm:inline">
-                    Sem preço fixo (ideal para itens personalizados)
-                  </span>
+                <div className="sm:col-span-3 bg-amber-50/70 p-3.5 rounded-xl border border-amber-200 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold text-stone-800">
+                      <input
+                        type="checkbox"
+                        checked={editProdIsPriceOnDemand}
+                        onChange={(e) => setEditProdIsPriceOnDemand(e.target.checked)}
+                        className="w-4 h-4 text-emerald-800 rounded border-stone-300 focus:ring-emerald-500"
+                      />
+                      <span>Preço "Sob Consulta" (WhatsApp / Oculto no Catálogo)</span>
+                    </label>
+                    <span className="text-[11px] text-stone-500 hidden sm:inline">
+                      Sem preço público para o cliente
+                    </span>
+                  </div>
+
+                  {editProdIsPriceOnDemand && (
+                    <div className="pt-2 border-t border-amber-200/80 flex flex-col sm:flex-row sm:items-center gap-3">
+                      <div className="w-full sm:w-64">
+                        <label className="block text-[11px] font-bold text-amber-950 uppercase mb-0.5">
+                          Preço de Referência Interno (R$)
+                        </label>
+                        <input
+                          type="text"
+                          value={editProdReferencePrice}
+                          onChange={(e) => setEditProdReferencePrice(e.target.value)}
+                          placeholder="Ex: 180,00"
+                          className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-xs font-bold text-emerald-950 focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+                        />
+                      </div>
+                      <p className="text-[11px] text-amber-900 leading-snug flex-1">
+                        💡 <strong>Uso interno:</strong> Usado para estimar o total de vendas e pedidos. Não será exibido no catálogo público.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 {!editProdIsPriceOnDemand && (

@@ -32,10 +32,15 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
 }) => {
   if (!isOpen || !order) return null;
 
+  const initialFreight = order.freightFee !== undefined ? order.freightFee : (order.deliveryCity.includes("Buritizeiro") ? 15.0 : 10.0);
+  const initialRef = order.referencePrice !== undefined ? order.referencePrice : Math.max(0, (order.totalPrice || 0) - initialFreight);
+
   const [customerName, setCustomerName] = useState(order.customerName);
   const [customerPhone, setCustomerPhone] = useState(order.customerPhone);
   const [customerBirthDate, setCustomerBirthDate] = useState(order.customerBirthDate || "");
   const [productName, setProductName] = useState(order.productName);
+  const [referencePrice, setReferencePrice] = useState(initialRef > 0 ? initialRef.toString().replace(".", ",") : "0");
+  const [freightFee, setFreightFee] = useState(initialFreight.toString().replace(".", ","));
   const [totalPrice, setTotalPrice] = useState(order.totalPrice?.toString() || "0");
   const [deliveryAddress, setDeliveryAddress] = useState(order.deliveryAddress);
   const [deliveryCity, setDeliveryCity] = useState(order.deliveryCity);
@@ -46,15 +51,44 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
   const [paymentMethod, setPaymentMethod] = useState(order.paymentMethod || "pix");
   const [notes, setNotes] = useState(order.notes || "");
 
+  // Update total price automatically when ref price or freight changes
+  const handleRefPriceChange = (val: string) => {
+    setReferencePrice(val);
+    const numRef = parseFloat(val.replace(",", ".")) || 0;
+    const numFreight = parseFloat(freightFee.replace(",", ".")) || 0;
+    setTotalPrice((numRef + numFreight).toFixed(2).replace(".", ","));
+  };
+
+  const handleFreightChange = (val: string) => {
+    setFreightFee(val);
+    const numRef = parseFloat(referencePrice.replace(",", ".")) || 0;
+    const numFreight = parseFloat(val.replace(",", ".")) || 0;
+    setTotalPrice((numRef + numFreight).toFixed(2).replace(".", ","));
+  };
+
+  const handleCityChange = (newCity: string) => {
+    setDeliveryCity(newCity);
+    const autoFreight = newCity.includes("Buritizeiro") ? 15.0 : 10.0;
+    setFreightFee(autoFreight.toString().replace(".", ","));
+    const numRef = parseFloat(referencePrice.replace(",", ".")) || 0;
+    setTotalPrice((numRef + autoFreight).toFixed(2).replace(".", ","));
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    const numRef = parseFloat(referencePrice.replace(",", ".")) || 0;
+    const numFreight = parseFloat(freightFee.replace(",", ".")) || 0;
+    const numTotal = parseFloat(totalPrice.replace(",", ".")) || (numRef + numFreight);
+
     const updated: KanbanOrder = {
       ...order,
       customerName: customerName.trim(),
       customerPhone: customerPhone.trim(),
       customerBirthDate: customerBirthDate.trim(),
       productName: productName.trim(),
-      totalPrice: parseFloat(totalPrice.replace(",", ".")) || 0,
+      referencePrice: numRef,
+      freightFee: numFreight,
+      totalPrice: numTotal,
       deliveryAddress: deliveryAddress.trim(),
       deliveryCity,
       deliveryDate: deliveryDate.trim(),
@@ -175,11 +209,11 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
                 </label>
                 <select
                   value={deliveryCity}
-                  onChange={(e) => setDeliveryCity(e.target.value)}
+                  onChange={(e) => handleCityChange(e.target.value)}
                   className="w-full px-2 py-2 bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
                 >
-                  <option value="Pirapora">Pirapora</option>
-                  <option value="Buritizeiro">Buritizeiro</option>
+                  <option value="Pirapora">Pirapora (Frete R$ 10,00)</option>
+                  <option value="Buritizeiro">Buritizeiro (Frete R$ 15,00)</option>
                 </select>
               </div>
             </div>
@@ -198,36 +232,62 @@ export const EditOrderModal: React.FC<EditOrderModalProps> = ({
             </div>
           </div>
 
-          {/* Section 3: Product, Card Message & Payment */}
+          {/* Section 3: Product, Values & Card Message */}
           <div className="bg-stone-50 p-3.5 rounded-2xl border border-stone-200 space-y-2.5">
             <span className="text-[11px] font-bold text-[#114b30] uppercase tracking-wider flex items-center gap-1.5">
               <MessageSquare className="w-3.5 h-3.5" />
-              <span>Mensagem do Cartão & Produto</span>
+              <span>Produto, Custo de Frete & Preço de Referência</span>
             </span>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div>
+              <label className="block text-[11px] font-bold text-stone-700 uppercase mb-0.5">
+                Produto / Arranjo
+              </label>
+              <input
+                type="text"
+                value={productName}
+                onChange={(e) => setProductName(e.target.value)}
+                required
+                className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 p-2.5 bg-amber-50/60 rounded-xl border border-amber-200/80">
               <div>
                 <label className="block text-[11px] font-bold text-stone-700 uppercase mb-0.5">
-                  Produto / Arranjo
+                  Custo Frete (R$)
                 </label>
                 <input
                   type="text"
-                  value={productName}
-                  onChange={(e) => setProductName(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+                  value={freightFee}
+                  onChange={(e) => handleFreightChange(e.target.value)}
+                  placeholder="10,00"
+                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
                 />
               </div>
 
               <div>
                 <label className="block text-[11px] font-bold text-stone-700 uppercase mb-0.5">
-                  Valor Total (R$)
+                  Ref. Arranjo (R$)
+                </label>
+                <input
+                  type="text"
+                  value={referencePrice}
+                  onChange={(e) => handleRefPriceChange(e.target.value)}
+                  placeholder="180,00"
+                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-emerald-950 uppercase mb-0.5">
+                  Total Estimado (R$)
                 </label>
                 <input
                   type="text"
                   value={totalPrice}
                   onChange={(e) => setTotalPrice(e.target.value)}
-                  className="w-full px-3 py-2 bg-white border border-stone-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
+                  className="w-full px-3 py-2 bg-white border border-emerald-400 rounded-xl text-xs font-bold text-emerald-950 focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
                 />
               </div>
             </div>

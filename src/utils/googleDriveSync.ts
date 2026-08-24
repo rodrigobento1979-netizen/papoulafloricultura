@@ -110,7 +110,9 @@ export function exportOrdersToCSV(orders: KanbanOrder[]): string {
     "Aniversario Cliente",
     "Produto / Arranjo",
     "Categoria",
-    "Valor Total (R$)",
+    "Preco Referencia Item (R$)",
+    "Custo de Frete (R$)",
+    "Valor Total Estimado (R$)",
     "Endereco de Entrega",
     "Cidade",
     "Data de Entrega",
@@ -120,23 +122,31 @@ export function exportOrdersToCSV(orders: KanbanOrder[]): string {
     "Foto Conclusao"
   ];
 
-  const rows = orders.map((o) => [
-    `"${o.orderNumber}"`,
-    `"${o.createdAt ? new Date(o.createdAt).toLocaleString("pt-BR") : ""}"`,
-    `"${o.customerName || ""}"`,
-    `"${o.customerPhone || ""}"`,
-    `"${o.customerBirthDate || ""}"`,
-    `"${o.productName || ""}"`,
-    `"${o.category || ""}"`,
-    `"${o.totalPrice?.toFixed(2) || "0,00"}"`,
-    `"${o.deliveryAddress || ""}"`,
-    `"${o.deliveryCity || ""}"`,
-    `"${o.deliveryDate || ""}"`,
-    `"${(o.cardMessage || "").replace(/"/g, '""')}"`,
-    `"${o.paymentMethod || "pix"}"`,
-    `"${o.status}"`,
-    `"${o.photoProofUrl || ""}"`
-  ]);
+  const rows = orders.map((o) => {
+    const freight = o.freightFee !== undefined ? o.freightFee : (o.deliveryCity?.includes("Buritizeiro") ? 15.0 : 10.0);
+    const refPrice = o.referencePrice !== undefined ? o.referencePrice : Math.max(0, (o.totalPrice || 0) - freight);
+    const total = o.totalPrice !== undefined ? o.totalPrice : (refPrice + freight);
+
+    return [
+      `"${o.orderNumber}"`,
+      `"${o.createdAt ? new Date(o.createdAt).toLocaleString("pt-BR") : ""}"`,
+      `"${o.customerName || ""}"`,
+      `"${o.customerPhone || ""}"`,
+      `"${o.customerBirthDate || ""}"`,
+      `"${o.productName || ""}"`,
+      `"${o.category || ""}"`,
+      `"${refPrice.toFixed(2)}"`,
+      `"${freight.toFixed(2)}"`,
+      `"${total.toFixed(2)}"`,
+      `"${o.deliveryAddress || ""}"`,
+      `"${o.deliveryCity || ""}"`,
+      `"${o.deliveryDate || ""}"`,
+      `"${(o.cardMessage || "").replace(/"/g, '""')}"`,
+      `"${o.paymentMethod || "pix"}"`,
+      `"${o.status}"`,
+      `"${o.photoProofUrl || ""}"`
+    ];
+  });
 
   return [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
 }

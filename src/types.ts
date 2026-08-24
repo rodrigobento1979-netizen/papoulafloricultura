@@ -27,7 +27,9 @@ export interface KanbanOrder {
   customerBirthDate?: string;
   productName: string;
   category: string;
-  totalPrice: number;
+  referencePrice?: number; // Preço de referência interno do arranjo (oculto no catálogo)
+  freightFee?: number; // Custo da taxa de frete / entrega
+  totalPrice: number; // Valor total estimado (referência + frete)
   deliveryAddress: string;
   deliveryNeighborhood?: string;
   deliveryCity: string;
@@ -45,6 +47,7 @@ export interface ProductSize {
   id: string;
   name: string; // ex: "Padrão (12 Rosas)", "Premium (18 Rosas)", "Luxo (24 Rosas)"
   price: number;
+  referencePrice?: number;
   originalPrice?: number;
   description: string;
 }
@@ -57,6 +60,7 @@ export interface Product {
   occasion: string[]; // ["romance", "aniversario", "agradecimento", "maternidade", "condolencias"]
   flowerType: string[]; // ["rosas", "girassol", "lirios", "orquideas", "astromelias"]
   price?: number; // Optional if isPriceOnDemand is true
+  referencePrice?: number; // Preço de referência interno quando marcado como "Sob Consulta"
   originalPrice?: number;
   isPriceOnDemand?: boolean; // When true, displays "Sob Consulta / WhatsApp" without fixed price
   orderCount?: number; // Dynamic count of orders for 5-star calculation

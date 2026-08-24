@@ -1,0 +1,607 @@
+import React, { useState } from "react";
+import { 
+  ShoppingBag, 
+  Calendar, 
+  Search, 
+  X, 
+  MessageCircle, 
+  DollarSign, 
+  Download, 
+  Database, 
+  Cake, 
+  Edit, 
+  Trash2,
+  CheckCircle2,
+  Clock,
+  Filter
+} from "lucide-react";
+import { KanbanOrder, KanbanOrderStatus, Product } from "../types";
+import { EditOrderModal } from "./EditOrderModal";
+import { WhatsAppOrderModal } from "./WhatsAppOrderModal";
+import { exportOrdersToCSV, downloadCSV } from "../utils/googleDriveSync";
+
+type DateFilterType = "all" | "today" | "yesterday" | "last7days" | "this_month" | "custom";
+
+interface OrdersListProps {
+  orders: KanbanOrder[];
+  products: Product[];
+  onUpdateOrderStatus: (orderId: string, status: KanbanOrderStatus, photoUrl?: string) => void;
+  onUpdateOrder: (updatedOrder: KanbanOrder) => void;
+  onAddOrder: (order: KanbanOrder) => void;
+  onDeleteOrder?: (orderId: string) => void;
+  onClearOrders?: () => void;
+  onOpenDatabaseSettings?: () => void;
+}
+
+const STATUS_CONFIG: Record<KanbanOrderStatus, { label: string; badgeBg: string; badgeText: string }> = {
+  pedido: {
+    label: "Novo Pedido",
+    badgeBg: "bg-blue-100",
+    badgeText: "text-blue-900",
+  },
+  confirmado: {
+    label: "Confirmado / Pago",
+    badgeBg: "bg-amber-100",
+    badgeText: "text-amber-900",
+  },
+  em_andamento: {
+    label: "Na Bancada / Produção",
+    badgeBg: "bg-purple-100",
+    badgeText: "text-purple-900",
+  },
+  concluido: {
+    label: "Concluído / Entregue",
+    badgeBg: "bg-emerald-100",
+    badgeText: "text-emerald-900",
+  },
+};
+
+export const OrdersList: React.FC<OrdersListProps> = ({
+  orders,
+  products,
+  onUpdateOrderStatus,
+  onUpdateOrder,
+  onAddOrder,
+  onDeleteOrder,
+  onClearOrders,
+  onOpenDatabaseSettings,
+}) => {
+  const [searchTerm, setSearchTerm] = useState("");
+  const [dateFilter, setDateFilter] = useState<DateFilterType>("all");
+  const [customStartDate, setCustomStartDate] = useState("");
+  const [customEndDate, setCustomEndDate] = useState("");
+  const [cityFilter, setCityFilter] = useState<"todas" | "Pirapora" | "Buritizeiro">("todas");
+
+  // Modals state
+  const [editingOrder, setEditingOrder] = useState<KanbanOrder | null>(null);
+  const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+
+  // Date filter evaluation
+  const isOrderMatchingDate = (order: KanbanOrder): boolean => {
+    if (dateFilter === "all") return true;
+
+    const rawDate = order.createdAt;
+    if (!rawDate) return true;
+
+    const orderTime = new Date(rawDate).getTime();
+    if (isNaN(orderTime)) return true;
+
+    const now = new Date();
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999).getTime();
+
+    if (dateFilter === "today") {
+      return orderTime >= startOfToday && orderTime <= endOfToday;
+    }
+
+    if (dateFilter === "yesterday") {
+      const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
+      const endOfYesterday = endOfToday - 24 * 60 * 60 * 1000;
+      return orderTime >= startOfYesterday && orderTime <= endOfYesterday;
+    }
+
+    if (dateFilter === "last7days") {
+      const start7DaysAgo = startOfToday - 7 * 24 * 60 * 60 * 1000;
+      return orderTime >= start7DaysAgo && orderTime <= endOfToday;
+    }
+
+    if (dateFilter === "this_month") {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999).getTime();
+      return orderTime >= startOfMonth && orderTime <= endOfMonth;
+    }
+
+    if (dateFilter === "custom") {
+      if (customStartDate) {
+        const customStart = new Date(`${customStartDate}T00:00:00`).getTime();
+        if (orderTime < customStart) return false;
+      }
+      if (customEndDate) {
+        const customEnd = new Date(`${customEndDate}T23:59:59`).getTime();
+        if (orderTime > customEnd) return false;
+      }
+      return true;
+    }
+
+    return true;
+  };
+
+  // Filter orders
+  const filteredOrders = orders.filter((o) => {
+    if (cityFilter !== "todas" && o.deliveryCity !== cityFilter) return false;
+    if (!isOrderMatchingDate(o)) return false;
+
+    if (searchTerm.trim()) {
+      const q = searchTerm.toLowerCase();
+      const matchNum = o.orderNumber?.toLowerCase().includes(q);
+      const matchCust = o.customerName?.toLowerCase().includes(q);
+      const matchPhone = o.customerPhone?.includes(q);
+      const matchProd = o.productName?.toLowerCase().includes(q);
+      const matchCity = o.deliveryCity?.toLowerCase().includes(q);
+      const matchAddr = o.deliveryAddress?.toLowerCase().includes(q);
+      const matchMsg = o.cardMessage?.toLowerCase().includes(q);
+      if (!matchNum && !matchCust && !matchPhone && !matchProd && !matchCity && !matchAddr && !matchMsg) return false;
+    }
+    return true;
+  });
+
+  // Calculate Detailed Metrics for Current Filter
+  const totalFreightSum = filteredOrders.reduce((acc, o) => {
+    const freight = o.freightFee !== undefined ? o.freightFee : (o.deliveryCity?.includes("Buritizeiro") ? 15.0 : 10.0);
+    return acc + freight;
+  }, 0);
+
+  const totalRefSalesSum = filteredOrders.reduce((acc, o) => {
+    const freight = o.freightFee !== undefined ? o.freightFee : (o.deliveryCity?.includes("Buritizeiro") ? 15.0 : 10.0);
+    const ref = o.referencePrice !== undefined ? o.referencePrice : Math.max(0, (o.totalPrice || 0) - freight);
+    return acc + ref;
+  }, 0);
+
+  const totalOverallSum = filteredOrders.reduce((acc, o) => {
+    const freight = o.freightFee !== undefined ? o.freightFee : (o.deliveryCity?.includes("Buritizeiro") ? 15.0 : 10.0);
+    const ref = o.referencePrice !== undefined ? o.referencePrice : Math.max(0, (o.totalPrice || 0) - freight);
+    const tot = o.totalPrice !== undefined && o.totalPrice > 0 ? o.totalPrice : (ref + freight);
+    return acc + tot;
+  }, 0);
+
+  const handleExportCSV = () => {
+    const csv = exportOrdersToCSV(filteredOrders);
+    const date = new Date().toISOString().split("T")[0];
+    downloadCSV(`pedidos_papoula_${date}.csv`, csv);
+  };
+
+  return (
+    <div className="flex-1 flex flex-col h-full space-y-4">
+      
+      {/* KPI METRICS OVERVIEW */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+        <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider block">
+              Total de Pedidos
+            </span>
+            <span className="text-2xl sm:text-3xl font-serif font-extrabold text-[#114b30]">
+              {filteredOrders.length}
+            </span>
+            <span className="text-[11px] text-stone-500 block mt-0.5">
+              {orders.length} pedidos na planilha
+            </span>
+          </div>
+          <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-[#114b30] flex items-center justify-center font-bold">
+            <ShoppingBag className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider block">
+              Custo de Fretes
+            </span>
+            <span className="text-2xl sm:text-3xl font-serif font-extrabold text-stone-900">
+              R$ {totalFreightSum.toFixed(2)}
+            </span>
+            <span className="text-[11px] text-stone-500 block mt-0.5">
+              Taxas de entrega somadas
+            </span>
+          </div>
+          <div className="w-11 h-11 rounded-2xl bg-stone-100 text-stone-700 flex items-center justify-center font-bold">
+            <span className="text-base font-serif font-extrabold">🚚</span>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-stone-500 uppercase tracking-wider block">
+              Vendas (Ref. Itens)
+            </span>
+            <span className="text-2xl sm:text-3xl font-serif font-extrabold text-emerald-800">
+              R$ {totalRefSalesSum.toFixed(2)}
+            </span>
+            <span className="text-[11px] text-emerald-700 font-medium block mt-0.5">
+              Estimativa interna dos arranjos
+            </span>
+          </div>
+          <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-800 flex items-center justify-center font-bold">
+            <DollarSign className="w-5 h-5" />
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-2xl border border-stone-200 shadow-xs flex items-center justify-between">
+          <div>
+            <span className="text-[11px] font-bold text-emerald-950 uppercase tracking-wider block">
+              Total Geral Estimado
+            </span>
+            <span className="text-2xl sm:text-3xl font-serif font-extrabold text-emerald-950">
+              R$ {totalOverallSum.toFixed(2)}
+            </span>
+            <span className="text-[11px] text-stone-500 block mt-0.5">
+              Itens + Frete ({dateFilter === "all" ? "Geral" : dateFilter})
+            </span>
+          </div>
+          <div className="w-11 h-11 rounded-2xl bg-amber-100 text-emerald-950 flex items-center justify-center font-bold">
+            <span className="text-base font-bold font-serif">✨</span>
+          </div>
+        </div>
+      </div>
+
+      {/* FILTER CONTROLS & ACTIONS BAR */}
+      <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-xs space-y-3.5">
+        
+        {/* Row 1: Header + Action buttons */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-stone-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-[#114b30] text-white flex items-center justify-center font-bold shrink-0 shadow-xs">
+              <ShoppingBag className="w-5 h-5 text-amber-300" />
+            </div>
+            <div>
+              <h2 className="font-serif font-bold text-base sm:text-lg text-stone-900 flex items-center gap-2">
+                <span>Listagem Geral de Pedidos</span>
+                <span className="text-xs bg-emerald-100 text-emerald-950 font-bold px-2.5 py-0.5 rounded-full">
+                  {filteredOrders.length} {filteredOrders.length === 1 ? "pedido encontrado" : "pedidos encontrados"}
+                </span>
+              </h2>
+              <p className="text-xs text-stone-500">
+                Lista de todos os pedidos cadastrados na planilha com filtro de data e busca rápida.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Create WhatsApp Order button */}
+            <button
+              onClick={() => setIsWhatsAppModalOpen(true)}
+              className="px-3.5 py-2 bg-[#25D366] hover:bg-[#1ebd59] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102"
+              title="Cadastrar Novo Pedido"
+            >
+              <MessageCircle className="w-4 h-4" />
+              <span>+ Novo Pedido</span>
+            </button>
+
+            {/* Export CSV button */}
+            <button
+              onClick={handleExportCSV}
+              className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Baixar lista em arquivo CSV / Excel"
+            >
+              <Download className="w-3.5 h-3.5 text-emerald-700" />
+              <span>Exportar CSV</span>
+            </button>
+
+            {/* Google Drive button */}
+            {onOpenDatabaseSettings && (
+              <button
+                onClick={onOpenDatabaseSettings}
+                className="px-3 py-2 bg-stone-100 hover:bg-emerald-50 text-stone-700 hover:text-emerald-900 border border-stone-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                title="Configurar Google Drive & Planilhas"
+              >
+                <Database className="w-3.5 h-3.5 text-emerald-800" />
+                <span>Google Drive</span>
+              </button>
+            )}
+
+            {/* Clear orders button */}
+            {onClearOrders && orders.length > 0 && (
+              <button
+                onClick={onClearOrders}
+                className="px-2.5 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1 cursor-pointer transition-colors"
+                title="Limpar todos os pedidos"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Limpar</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Date Filters & Search */}
+        <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3">
+          
+          {/* Date Filter Pills */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold text-stone-500 flex items-center gap-1 mr-1">
+              <Calendar className="w-3.5 h-3.5 text-[#114b30]" />
+              <span>Filtrar por Data:</span>
+            </span>
+
+            {[
+              { id: "all", label: "Todas as Datas" },
+              { id: "today", label: "Hoje" },
+              { id: "yesterday", label: "Ontem" },
+              { id: "last7days", label: "Últimos 7 dias" },
+              { id: "this_month", label: "Este Mês" },
+              { id: "custom", label: "Personalizado" },
+            ].map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setDateFilter(tab.id as DateFilterType)}
+                className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all cursor-pointer ${
+                  dateFilter === tab.id
+                    ? "bg-[#114b30] text-white shadow-2xs"
+                    : "bg-stone-100 hover:bg-stone-200 text-stone-700"
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Search box & City Filter */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="relative text-xs flex-1 sm:w-64">
+              <Search className="w-3.5 h-3.5 text-stone-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                placeholder="Buscar cliente, número, arranjo..."
+                className="w-full pl-8 pr-3 py-1.5 bg-stone-50 border border-stone-200 rounded-xl focus:outline-none focus:ring-1 focus:ring-emerald-600 text-xs"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-stone-400 hover:text-stone-600"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+
+            {/* City filter */}
+            <div className="flex items-center gap-1 bg-stone-100 p-1 rounded-xl text-xs">
+              {(["todas", "Pirapora", "Buritizeiro"] as const).map((city) => (
+                <button
+                  key={city}
+                  onClick={() => setCityFilter(city)}
+                  className={`px-2.5 py-1 rounded-lg font-semibold text-xs transition-colors cursor-pointer ${
+                    cityFilter === city
+                      ? "bg-white text-emerald-950 font-bold shadow-2xs"
+                      : "text-stone-600 hover:text-stone-900"
+                  }`}
+                >
+                  {city === "todas" ? "Todas Cidades" : city}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Optional Row 3: Custom Date Range Pickers */}
+        {dateFilter === "custom" && (
+          <div className="bg-emerald-50/70 border border-emerald-200 rounded-xl p-3 flex flex-wrap items-center gap-4 text-xs animate-fadeIn">
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-emerald-950">De:</span>
+              <input
+                type="date"
+                value={customStartDate}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                className="px-2.5 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-medium focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-emerald-950">Até:</span>
+              <input
+                type="date"
+                value={customEndDate}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                className="px-2.5 py-1 bg-white border border-emerald-300 rounded-lg text-xs font-medium focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+              />
+            </div>
+            {(customStartDate || customEndDate) && (
+              <button
+                onClick={() => {
+                  setCustomStartDate("");
+                  setCustomEndDate("");
+                }}
+                className="text-[11px] text-emerald-800 underline font-bold hover:text-emerald-950 cursor-pointer"
+              >
+                Limpar datas
+              </button>
+            )}
+          </div>
+        )}
+
+      </div>
+
+      {/* LISTAGEM DE PEDIDOS EM TABELA COMPLETA */}
+      <div className="bg-white rounded-2xl border border-stone-200 overflow-hidden shadow-xs">
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-stone-100 text-stone-700 font-bold uppercase text-[10px] tracking-wider border-b border-stone-200">
+              <tr>
+                <th className="py-3 px-3.5">Nº Pedido</th>
+                <th className="py-3 px-3.5">Data / Hora</th>
+                <th className="py-3 px-3.5">Cliente</th>
+                <th className="py-3 px-3.5">WhatsApp</th>
+                <th className="py-3 px-3.5">Aniversário</th>
+                <th className="py-3 px-3.5">Produto / Arranjo</th>
+                <th className="py-3 px-3.5">Endereço & Cidade</th>
+                <th className="py-3 px-3.5 text-stone-700">Custo Frete</th>
+                <th className="py-3 px-3.5 text-emerald-900">Ref. Arranjo</th>
+                <th className="py-3 px-3.5 text-emerald-950 font-extrabold">Total Estimado</th>
+                <th className="py-3 px-3.5">Status</th>
+                <th className="py-3 px-3.5 text-right">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-200">
+              {filteredOrders.length === 0 ? (
+                <tr>
+                  <td colSpan={12} className="py-12 text-center text-stone-400">
+                    <ShoppingBag className="w-8 h-8 mx-auto mb-2 opacity-30 text-[#114b30]" />
+                    <p className="text-sm font-medium text-stone-600">Nenhum pedido encontrado para o período selecionado.</p>
+                    <p className="text-xs text-stone-400 mt-1">Experimente trocar o filtro de data ou limpar a busca.</p>
+                  </td>
+                </tr>
+              ) : (
+                filteredOrders.map((order) => {
+                  const statusInfo = STATUS_CONFIG[order.status] || STATUS_CONFIG.pedido;
+                  const formattedDate = order.createdAt
+                    ? new Date(order.createdAt).toLocaleDateString("pt-BR", {
+                        day: "2-digit",
+                        month: "2-digit",
+                        year: "2-digit",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "—";
+
+                  const orderFreight = order.freightFee !== undefined 
+                    ? order.freightFee 
+                    : (order.deliveryCity?.includes("Buritizeiro") ? 15.0 : 10.0);
+
+                  const orderRefPrice = order.referencePrice !== undefined 
+                    ? order.referencePrice 
+                    : Math.max(0, (order.totalPrice || 0) - orderFreight);
+
+                  const orderTotal = order.totalPrice !== undefined && order.totalPrice > 0 
+                    ? order.totalPrice 
+                    : (orderRefPrice + orderFreight);
+
+                  return (
+                    <tr key={order.id} className="hover:bg-stone-50/80 transition-colors">
+                      <td className="py-3 px-3.5 font-mono font-bold text-emerald-950">
+                        {order.orderNumber}
+                      </td>
+                      <td className="py-3 px-3.5 text-stone-500 font-medium whitespace-nowrap text-[11px]">
+                        {formattedDate}
+                      </td>
+                      <td className="py-3 px-3.5 font-semibold text-stone-900">
+                        {order.customerName}
+                      </td>
+                      <td className="py-3 px-3.5">
+                        {order.customerPhone ? (
+                          <a
+                            href={`https://wa.me/55${order.customerPhone.replace(/\D/g, "")}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-emerald-700 hover:underline flex items-center gap-1 font-medium"
+                          >
+                            <MessageCircle className="w-3.5 h-3.5 text-[#25D366]" />
+                            <span>{order.customerPhone}</span>
+                          </a>
+                        ) : (
+                          <span className="text-stone-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3.5 text-stone-600">
+                        {order.customerBirthDate ? (
+                          <span className="flex items-center gap-1 text-rose-700 font-medium">
+                            <Cake className="w-3.5 h-3.5 text-rose-500" />
+                            {order.customerBirthDate}
+                          </span>
+                        ) : (
+                          <span className="text-stone-400">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3.5 font-medium text-stone-800 max-w-xs">
+                        <span className="block truncate font-semibold">{order.productName}</span>
+                        {order.cardMessage && (
+                          <span className="text-[10px] text-stone-400 italic block truncate">
+                            "{order.cardMessage}"
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3.5 text-stone-600 max-w-xs">
+                        <span className="block truncate">{order.deliveryAddress || "Retirada na Loja"}</span>
+                        <span className="text-[10px] font-bold text-[#114b30]">{order.deliveryCity}</span>
+                      </td>
+                      <td className="py-3 px-3.5 font-medium text-stone-600 whitespace-nowrap">
+                        R$ {orderFreight.toFixed(2)}
+                      </td>
+                      <td className="py-3 px-3.5 font-semibold text-emerald-800 whitespace-nowrap">
+                        R$ {orderRefPrice.toFixed(2)}
+                      </td>
+                      <td className="py-3 px-3.5 font-bold text-emerald-950 whitespace-nowrap">
+                        R$ {orderTotal.toFixed(2)}
+                      </td>
+                      <td className="py-3 px-3.5">
+                        <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full ${statusInfo.badgeBg} ${statusInfo.badgeText}`}>
+                          {statusInfo.label}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3.5 text-right space-x-1.5 whitespace-nowrap">
+                        <button
+                          onClick={() => setEditingOrder(order)}
+                          className="px-2.5 py-1 text-emerald-900 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors cursor-pointer inline-flex items-center gap-1"
+                          title="Editar / Ver detalhes do pedido"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                          <span>Editar</span>
+                        </button>
+                        {onDeleteOrder && (
+                          <button
+                            onClick={() => onDeleteOrder(order.id)}
+                            className="p-1 text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                            title="Remover pedido"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+            {filteredOrders.length > 0 && (
+              <tfoot className="bg-stone-100/90 font-bold border-t-2 border-stone-300 text-stone-900">
+                <tr>
+                  <td colSpan={7} className="py-3 px-3.5 text-right text-[11px] uppercase tracking-wider text-stone-600">
+                    Totais do Período ({filteredOrders.length} {filteredOrders.length === 1 ? "pedido" : "pedidos"}):
+                  </td>
+                  <td className="py-3 px-3.5 font-bold text-stone-700 whitespace-nowrap">
+                    R$ {totalFreightSum.toFixed(2)}
+                  </td>
+                  <td className="py-3 px-3.5 font-bold text-emerald-800 whitespace-nowrap">
+                    R$ {totalRefSalesSum.toFixed(2)}
+                  </td>
+                  <td className="py-3 px-3.5 font-extrabold text-emerald-950 whitespace-nowrap text-sm">
+                    R$ {totalOverallSum.toFixed(2)}
+                  </td>
+                  <td colSpan={2}></td>
+                </tr>
+              </tfoot>
+            )}
+          </table>
+        </div>
+      </div>
+
+      {/* Edit Order Modal */}
+      <EditOrderModal
+        order={editingOrder}
+        isOpen={!!editingOrder}
+        onClose={() => setEditingOrder(null)}
+        onSaveOrder={onUpdateOrder}
+        products={products}
+      />
+
+      {/* WhatsApp Quick Order Modal */}
+      <WhatsAppOrderModal
+        isOpen={isWhatsAppModalOpen}
+        onClose={() => setIsWhatsAppModalOpen(false)}
+        products={products}
+        onCreateOrder={onAddOrder}
+      />
+
+    </div>
+  );
+};

@@ -4,12 +4,14 @@ interface PapoulaLogoProps {
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   showTextBeside?: boolean;
   className?: string;
+  variant?: "dark" | "light";
 }
 
 export const PapoulaLogo: React.FC<PapoulaLogoProps> = ({
   size = "md",
   showTextBeside = true,
   className = "",
+  variant = "dark",
 }) => {
   const sizeMap = {
     xs: { circle: "w-9 h-9", textTitle: "text-base", textSub: "text-[10px]" },
@@ -20,6 +22,7 @@ export const PapoulaLogo: React.FC<PapoulaLogoProps> = ({
   };
 
   const current = sizeMap[size];
+  const isLight = variant === "light";
 
   return (
     <div className={`flex items-center gap-3 select-none ${className}`}>
@@ -81,20 +84,30 @@ export const PapoulaLogo: React.FC<PapoulaLogoProps> = ({
       {showTextBeside && (
         <div className="leading-tight">
           <div className="flex items-baseline gap-1.5">
-            <span className="text-[11px] sm:text-xs tracking-widest text-emerald-800 uppercase font-sans font-extrabold block">
+            <span className={`text-[11px] sm:text-xs tracking-widest uppercase font-sans font-extrabold block ${
+              isLight ? "text-emerald-200" : "text-emerald-800"
+            }`}>
               FLORICULTURA
             </span>
-            <span className="text-[9px] bg-red-100 text-red-800 font-bold px-1.5 py-0.2 rounded-full uppercase tracking-wider hidden sm:inline border border-red-200">
+            <span className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full uppercase tracking-wider hidden sm:inline border ${
+              isLight 
+                ? "bg-rose-500/30 text-rose-200 border-rose-400/40" 
+                : "bg-red-100 text-red-800 border-red-200"
+            }`}>
               Pirapora - MG
             </span>
           </div>
           <span
-            className={`font-serif font-extrabold text-stone-900 tracking-tight block ${current.textTitle}`}
+            className={`font-serif font-extrabold tracking-tight block ${current.textTitle} ${
+              isLight ? "text-white" : "text-stone-900"
+            }`}
             style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
           >
             Papoula
           </span>
-          <span className="text-[11px] text-stone-500 font-medium block">
+          <span className={`text-[11px] font-medium block ${
+            isLight ? "text-emerald-100/80" : "text-stone-500"
+          }`}>
             Rua Mato Grosso, 211B • Entregas em Pirapora & Buritizeiro
           </span>
         </div>
