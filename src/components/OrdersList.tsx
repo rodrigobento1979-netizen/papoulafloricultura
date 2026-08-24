@@ -28,6 +28,7 @@ import {
   parseOrdersFromCSV, 
   mergeOrders 
 } from "../utils/googleDriveSync";
+import { buildWhatsAppUrl } from "../utils/whatsapp";
 
 type DateFilterType = "all" | "today" | "yesterday" | "last7days" | "this_month" | "custom";
 
@@ -694,7 +695,7 @@ export const OrdersList: React.FC<OrdersListProps> = ({
                       <td className="py-3 px-3.5">
                         {order.customerPhone ? (
                           <a
-                            href={`https://wa.me/55${order.customerPhone.replace(/\D/g, "")}`}
+                            href={buildWhatsAppUrl(order.customerPhone)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="text-emerald-700 hover:underline flex items-center gap-1 font-medium"

@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Product, ProductSize } from "../types";
 import { CityOption } from "../data/cities";
+import { openWhatsApp } from "../utils/whatsapp";
 
 interface ProductDetailModalProps {
   product: Product | null;
@@ -74,8 +75,7 @@ export const ProductDetailModal: React.FC<ProductDetailModalProps> = ({
       const sizeText = selectedSize ? ` (Tamanho: ${selectedSize.name})` : "";
       const priceText = !isPriceOnDemand ? ` - Valor: ${formatCurrency(currentPrice)}` : " - Sob Consulta";
       const msg = `Olá! Gostaria de encomendar o arranjo *${product.name}*${sizeText}${priceText} da Floricultura Papoula para entrega em *${selectedCityName}* (Frete: ${formatCurrency(deliveryFee)}).`;
-      const waUrl = `https://wa.me/5538988512855?text=${encodeURIComponent(msg)}`;
-      window.open(waUrl, "_blank");
+      openWhatsApp("5538988512855", msg);
     }
   };
 

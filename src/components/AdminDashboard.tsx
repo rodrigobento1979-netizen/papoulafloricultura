@@ -52,6 +52,7 @@ import { AICatalogExtractorModal } from "./AICatalogExtractorModal";
 import { ImageUploadInput } from "./ImageUploadInput";
 import { exportOrdersToCSV, exportCustomersToCSV, downloadCSV, downloadOfficialSpreadsheetTemplate, sendOrderToGoogleSheetsWebhook } from "../utils/googleDriveSync";
 import { calculateStarRating, getStoreBusinessHours, DEFAULT_STORE_CONFIG } from "../utils/businessHours";
+import { buildWhatsAppUrl } from "../utils/whatsapp";
 
 interface AdminDashboardProps {
   products: Product[];
@@ -1195,7 +1196,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       {cust.phone}
                                     </span>
                                     <a
-                                      href={`https://wa.me/55${cust.phone.replace(/\D/g, "")}?text=${encodeURIComponent(`Olá, ${cust.fullName}! Tudo bem? Aqui é da Floricultura Papoula em Pirapora.`)}`}
+                                      href={buildWhatsAppUrl(cust.phone, `Olá, ${cust.fullName}! Tudo bem? Aqui é da Floricultura Papoula em Pirapora.`)}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       title="Abrir WhatsApp com este cliente"
@@ -1265,11 +1266,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <td className="py-3 px-4 text-right">
                                   <div className="flex items-center justify-end gap-1.5">
                                     <a
-                                      href={`https://wa.me/55${cust.phone.replace(/\D/g, "")}?text=${encodeURIComponent(
+                                      href={buildWhatsAppUrl(
+                                        cust.phone,
                                         isMonthBday 
                                           ? `Olá, ${cust.fullName}! Parabéns pelo seu aniversário neste mês! 🌸 Desejamos muitas felicidades. Venha retirar um mimo especial na Floricultura Papoula.`
                                           : `Olá, ${cust.fullName}! Tudo bem? Falamos da Floricultura Papoula.`
-                                      )}`}
+                                      )}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold flex items-center gap-1 transition-colors"

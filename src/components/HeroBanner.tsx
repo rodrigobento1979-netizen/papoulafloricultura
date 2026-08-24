@@ -1,6 +1,7 @@
 import React from "react";
 import { MapPin, Clock, ArrowRight, MessageCircle, Heart, Sparkles, ShieldCheck } from "lucide-react";
 import { CityOption } from "../data/cities";
+import { buildWhatsAppUrl } from "../utils/whatsapp";
 
 interface HeroBannerProps {
   currentCity: CityOption;
@@ -208,7 +209,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
           {/* Direct WhatsApp Call Badge */}
           <div className="pt-2">
             <a
-              href="https://wa.me/5538988512855?text=Ol%C3%A1%21+Gostaria+de+fazer+um+pedido+na+Floricultura+Papoula"
+              href={buildWhatsAppUrl("5538988512855", "Olá! Gostaria de fazer um pedido na Floricultura Papoula")}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-2.5 bg-[#25D366] hover:bg-[#20bd5a] text-white px-5 py-3 rounded-2xl text-sm font-bold shadow-lg shadow-emerald-950/40 transition-all hover:scale-105 border border-emerald-300/40"

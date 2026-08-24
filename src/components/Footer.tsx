@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Phone, Mail, MapPin, ChevronDown, ChevronUp, MessageCircle, ShieldCheck, Heart } from "lucide-react";
 import { POPULAR_CITIES } from "../data/cities";
 import { PapoulaLogo } from "./PapoulaLogo";
+import { buildWhatsAppUrl } from "../utils/whatsapp";
 
 export const Footer: React.FC = () => {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
@@ -79,7 +80,7 @@ export const Footer: React.FC = () => {
                 <Phone className="w-3.5 h-3.5 text-emerald-400 shrink-0" /> (38) 98851-2855
               </p>
               <a
-                href="https://wa.me/5538988512855?text=Ol%C3%A1%21+Vim+pelo+site+da+Floricultura+Papoula"
+                href={buildWhatsAppUrl("5538988512855", "Olá! Vim pelo site da Floricultura Papoula")}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex items-center gap-1.5 text-amber-300 hover:text-amber-200"

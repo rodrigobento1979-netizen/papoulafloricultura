@@ -47,6 +47,7 @@ import { SupportBotDrawer } from "./components/SupportBotDrawer";
 import { AdminDashboard } from "./components/AdminDashboard";
 import { WhatsAppOrderModal } from "./components/WhatsAppOrderModal";
 import { Footer } from "./components/Footer";
+import { buildWhatsAppUrl } from "./utils/whatsapp";
 
 export default function App() {
   // Location state
@@ -1042,7 +1043,7 @@ export default function App() {
 
       {/* Floating Bottom-Right WhatsApp Contact Button */}
       <a
-        href={`https://wa.me/${storeConfig.whatsapp || "5538988512855"}?text=${encodeURIComponent("Olá! Gostaria de falar com a Floricultura Papoula sobre encomendar flores.")}`}
+        href={buildWhatsAppUrl(storeConfig.whatsapp || "5538988512855", "Olá! Gostaria de falar com a Floricultura Papoula sobre encomendar flores.")}
         target="_blank"
         rel="noopener noreferrer"
         className="fixed bottom-6 right-6 z-40 bg-[#25D366] hover:bg-[#20bd5a] text-white p-3.5 sm:px-4 sm:py-3 rounded-full shadow-2xl hover:scale-105 transition-all flex items-center gap-2.5 border-2 border-white/80 cursor-pointer group"

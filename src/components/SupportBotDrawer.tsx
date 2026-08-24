@@ -24,6 +24,7 @@ import {
 import { PapoulaLogo } from "./PapoulaLogo";
 import { Customer, KanbanOrder, Product, StoreConfig } from "../types";
 import { getStoreBusinessHours, DEFAULT_STORE_CONFIG } from "../utils/businessHours";
+import { buildWhatsAppUrl } from "../utils/whatsapp";
 
 interface Message {
   id: string;
@@ -153,7 +154,7 @@ export const SupportBotDrawer: React.FC<SupportBotDrawerProps> = ({
         timestamp: "Agora",
         link: {
           label: `📲 Falar com Florista no WhatsApp ${storeConfig.phone}`,
-          url: `https://wa.me/${storeConfig.whatsapp}?text=Ol%C3%A1%21+Vim+pelo+atendimento+virtual+da+Floricultura+Papoula+e+gostaria+de+informa%C3%A7%C3%B5es`,
+          url: buildWhatsAppUrl(storeConfig.whatsapp || "5538988512855", "Olá! Vim pelo atendimento virtual da Floricultura Papoula e gostaria de informações"),
         },
       },
     ]);
@@ -257,7 +258,7 @@ export const SupportBotDrawer: React.FC<SupportBotDrawerProps> = ({
       },
       link: {
         label: "📲 Confirmar no WhatsApp da Floricultura",
-        url: `https://wa.me/${storeConfig.whatsapp}?text=${encodeURIComponent(`Olá! Acabei de solicitar o pedido ${orderNum} (${orderProduct.name}) no site da Floricultura Papoula para entrega em ${orderCity} (Total: R$ ${grandTotal.toFixed(2)} com entrega). Gostaria de confirmar!`)}`,
+        url: buildWhatsAppUrl(storeConfig.whatsapp || "5538988512855", `Olá! Acabei de solicitar o pedido ${orderNum} (${orderProduct.name}) no site da Floricultura Papoula para entrega em ${orderCity} (Total: R$ ${grandTotal.toFixed(2)} com entrega). Gostaria de confirmar!`),
       },
     };
 
@@ -314,7 +315,7 @@ export const SupportBotDrawer: React.FC<SupportBotDrawerProps> = ({
         text: "🛵 *Taxas de Entrega da Floricultura Papoula:*\n\n• **Pirapora:** R$ 10,00 (Entrega Expressa no mesmo dia)\n• **Buritizeiro:** R$ 15,00 (Entrega Expressa no mesmo dia)\n\n✨ Pedidos até às 17h saem fresquinhos no mesmo dia com foto enviada antes da entrega!",
         link: {
           label: "📲 Falar com Atendente no WhatsApp",
-          url: "https://wa.me/5538988512855?text=Ol%C3%A1%21+Gostaria+de+solicitar+uma+entrega+em+Pirapora%2FBuritizeiro",
+          url: buildWhatsAppUrl(storeConfig.whatsapp || "5538988512855", "Olá! Gostaria de solicitar uma entrega em Pirapora/Buritizeiro"),
         },
       };
     }
@@ -342,7 +343,7 @@ export const SupportBotDrawer: React.FC<SupportBotDrawerProps> = ({
         text: "📱 Nosso florista de plantão está disponível no WhatsApp para te atender com carinho!",
         link: {
           label: "💬 Conversar no WhatsApp (38) 98851-2855",
-          url: "https://wa.me/5538988512855?text=Ol%C3%A1%21+Gostaria+de+falar+com+um+atendente+da+Floricultura+Papoula",
+          url: buildWhatsAppUrl(storeConfig.whatsapp || "5538988512855", "Olá! Gostaria de falar com um atendente da Floricultura Papoula"),
         },
       };
     }
@@ -351,7 +352,7 @@ export const SupportBotDrawer: React.FC<SupportBotDrawerProps> = ({
       text: "Arranjos florais nobres com rosas colombianas, girassóis, orquídeas e cestas de café da manhã montadas na hora em Pirapora e Buritizeiro. Deseja fazer uma encomenda rápida?",
       link: {
         label: "📲 Falar no WhatsApp da Loja",
-        url: "https://wa.me/5538988512855?text=Ol%C3%A1%21+Vim+pelo+atendimento+online+da+Floricultura+Papoula",
+        url: buildWhatsAppUrl(storeConfig.whatsapp || "5538988512855", "Olá! Vim pelo atendimento online da Floricultura Papoula"),
       },
     };
   };

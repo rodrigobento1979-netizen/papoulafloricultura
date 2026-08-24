@@ -32,6 +32,7 @@ import { KanbanOrder, KanbanOrderStatus, Product } from "../types";
 import { EditOrderModal } from "./EditOrderModal";
 import { WhatsAppOrderModal } from "./WhatsAppOrderModal";
 import { exportOrdersToCSV, downloadCSV } from "../utils/googleDriveSync";
+import { buildWhatsAppUrl, openWhatsApp } from "../utils/whatsapp";
 
 type DateFilterType = "all" | "today" | "yesterday" | "last7days" | "this_month" | "custom";
 
@@ -182,8 +183,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     const msg = `🌺 *Floricultura Papoula - Seu Pedido está Pronto!* 🌺\n\nOlá, *${concludingOrder.customerName}*!\n\nSeu pedido *${concludingOrder.orderNumber}* (${concludingOrder.productName}) foi montado com todo carinho pela nossa equipe e já está pronto para entrega em ${concludingOrder.deliveryCity}!\n\n📍 *Endereço:* ${concludingOrder.deliveryAddress}\n✨ *Status:* Concluído & Pronto para Entrega!\n\n📸 *Comprovação da montagem:* Flores frescas e higienizadas.\n\nMuito obrigado pela preferência!\n*Floricultura Papoula* • Rua Mato Grosso, 211B - Centro, Pirapora/MG`;
     
     if (cleanPhone) {
-      const waUrl = `https://wa.me/55${cleanPhone}?text=${encodeURIComponent(msg)}`;
-      window.open(waUrl, "_blank");
+      openWhatsApp(cleanPhone, msg);
     }
 
     setConcludingOrder(null);
@@ -692,7 +692,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                               </span>
                               {order.customerPhone && (
                                 <a
-                                  href={`https://wa.me/55${order.customerPhone.replace(/\D/g, "")}`}
+                                  href={buildWhatsAppUrl(order.customerPhone)}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   className="text-emerald-700 hover:text-emerald-900 p-0.5"
@@ -824,7 +824,7 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
                         <td className="py-2.5 px-3.5">
                           {order.customerPhone ? (
                             <a
-                              href={`https://wa.me/55${order.customerPhone.replace(/\D/g, "")}`}
+                              href={buildWhatsAppUrl(order.customerPhone)}
                               target="_blank"
                               rel="noopener noreferrer"
                               className="text-emerald-700 hover:underline flex items-center gap-1 font-medium"

@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Product, ProductSize, GoogleDriveConfig } from "../types";
 import { sendOrderToGoogleSheetsWebhook } from "../utils/googleDriveSync";
+import { openWhatsApp } from "../utils/whatsapp";
 
 interface WhatsAppOrderModalProps {
   isOpen: boolean;
@@ -109,7 +110,7 @@ export const WhatsAppOrderModal: React.FC<WhatsAppOrderModalProps> = ({
 
     let senderInfoText = "";
     if (senderType === "anonymous") {
-      senderInfoText = `🕵️‍♂️ *ENVIO ANÔNIMO / ADMIRADOR SECRETO*\n_(Não colocar o nome de quem comprou no cartão)_\n*WhatsApp para envio da chave PIX:* ${senderPhone || "Informarei aqui na conversa"}`;
+      senderInfoText = `🕵 *ENVIO ANÔNIMO / ADMIRADOR SECRETO*\n_(Não colocar o nome de quem comprou no cartão)_\n*WhatsApp para envio da chave PIX:* ${senderPhone || "Informarei aqui na conversa"}`;
     } else {
       senderInfoText = `👤 *Remetente:* ${senderName.trim()} ${senderPhone ? `(${senderPhone.trim()})` : ""}`;
     }
@@ -171,8 +172,7 @@ ${recipientPhone.trim() ? `• *Telefone Destinatário:* ${recipientPhone.trim()
       console.warn("Could not sync with Google Sheets:", e);
     }
 
-    const waUrl = `https://wa.me/5538988512855?text=${encodeURIComponent(msg)}`;
-    window.open(waUrl, "_blank");
+    openWhatsApp("5538988512855", msg);
 
     setCurrentStep(5);
   };
