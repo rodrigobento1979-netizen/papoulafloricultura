@@ -343,6 +343,8 @@ export async function fetchStoreDataFromGoogleSheets(
             occasion: Array.isArray(p.occasion) ? p.occasion : [],
             flowerType: Array.isArray(p.flowerType) ? p.flowerType : [],
           }));
+        } else if (data.productsCSV) {
+          products = parseCatalogFromCSV(data.productsCSV);
         }
 
         if (Array.isArray(data.categories)) {
@@ -354,6 +356,8 @@ export async function fetchStoreDataFromGoogleSheets(
             description: c.description || "",
             active: c.active !== false && String(c.active).toLowerCase() !== "nao",
           }));
+        } else if (data.categoriesCSV) {
+          categories = parseCategoriesFromCSV(data.categoriesCSV);
         }
 
         return {
@@ -1110,40 +1114,144 @@ export function downloadCSV(filename: string, content: string) {
 }
 
 /**
- * Complete Google Apps Script Master Code for multi-tab support
+ * Complete Google Apps Script Master Code for multi-tab support with automatic tab and column creation
  */
 export const GOOGLE_APPS_SCRIPT_MASTER_CODE = `/**
  * =========================================================================
  * FLORICULTURA PAPOULA - GOOGLE APPS SCRIPT WEB APP MULTI-ABAS
- * Integração Oficial: Pedidos, Catálogo de Flores, Categorias e Clientes
+ * Integração Oficial Automática: Produtos, Categorias, Pedidos e Clientes
  * =========================================================================
  * 
- * Cria e gerencia automaticamente 3 abas na sua planilha do Google Drive:
- *   1. "Pedidos"    -> Novos pedidos do WhatsApp / Site em tempo real
- *   2. "Catalogo"   -> Produtos, fotos, preços de referência e estoque
- *   3. "Categorias" -> Categorias da vitrine com ícones e descrições
+ * Este script cria AUTOMATICAMENTE todas as abas e colunas necessárias na planilha:
+ *   1. "Produtos"   -> Catálogo de flores, fotos, preços, estoque e detalhes
+ *   2. "Categorias" -> Categorias de presentes e flores com ícones e status
+ *   3. "Pedidos"    -> Pedidos recebidos via WhatsApp e loja virtual
+ *   4. "Clientes"   -> Cadastro de clientes com datas de aniversário
  * 
  * INSTRUÇÕES:
- * 1. Na sua Planilha Google, acesse: Extensões > Apps Script.
- * 2. Substitua todo o código existente por este e clique em "Salvar" (ícone do disquete).
- * 3. Clique em "Implantar" (Deploy) > "Nova implantação".
- * 4. Tipo: "Aplicativo da Web" (Web App).
+ * 1. Na sua Planilha Google, acesse no menu superior: Extensões > Apps Script.
+ * 2. Apague tudo o que estiver lá, cole este código completo e clique em Salvar (ícone do disquete).
+ * 3. Clique no botão azul "Implantar" (Deploy) > "Nova implantação".
+ * 4. Tipo de implantação: "Aplicativo da Web" (Web App).
  * 5. Executar como: "Eu" (Seu e-mail).
- * 6. Quem pode acessar: "Qualquer pessoa" (Anyone) - CRUCIAL!
- * 7. Copie a URL do Webhook gerada e cole no Painel de Controle da Floricultura.
+ * 6. Quem pode acessar: "Qualquer pessoa" (Anyone) - IMPORTANTE!
+ * 7. Clique em "Implantar", copie a URL gerada (terminada em /exec) e cole no Painel Administrativo.
  */
 
-function getOrCreateSheet(ss, name) {
-  var sheet = ss.getSheetByName(name);
-  if (!sheet) {
-    sheet = ss.insertSheet(name);
+// Configuração das colunas e abas
+var SHEET_CONFIG = {
+  produtos: {
+    name: "Produtos",
+    aliases: ["Produtos", "Catalogo", "Catálogo"],
+    headers: [
+      "ID / Codigo", "Nome do Produto", "Slug", "Categoria", "Preco Venda (R$)",
+      "Preco Referencia (R$)", "Preco Original (R$)", "Sob Consulta", "Ocasioes",
+      "Tipos de Flor", "URL da Imagem", "Descricao", "Itens Inclusos",
+      "Instrucoes de Cuidado", "Tags", "Avaliacao", "Total Avaliacoes", "Em Estoque", "Total Pedidos"
+    ]
+  },
+  categorias: {
+    name: "Categorias",
+    aliases: ["Categorias", "Categoria"],
+    headers: [
+      "ID / Slug", "Nome da Categoria", "Icone / Emoji", "Descricao", "Ativo"
+    ]
+  },
+  pedidos: {
+    name: "Pedidos",
+    aliases: ["Pedidos", "Vendas"],
+    headers: [
+      "Numero Pedido", "Data Criacao", "Cliente / Remetente", "WhatsApp Cliente",
+      "Aniversario Cliente", "Produto / Arranjo", "Categoria", "Preco Referencia Item (R$)",
+      "Custo de Frete (R$)", "Valor Total Estimado (R$)", "Destinatario", "Telefone Destinatario",
+      "Cidade de Entrega", "Endereco Completo", "Bairro", "Ponto de Referencia",
+      "Data de Entrega", "Horario", "Mensagem do Cartao", "Forma Pagamento", "Status Kanban", "Foto Conclusao"
+    ]
+  },
+  clientes: {
+    name: "Clientes",
+    aliases: ["Clientes", "Contatos"],
+    headers: [
+      "Nome Completo", "WhatsApp / Telefone", "Data de Aniversario", "Data Cadastro", "Total Pedidos", "Observacoes / Mimos"
+    ]
   }
+};
+
+/**
+ * Cria ou localiza uma aba pelo nome ou apelidos, e inicializa as colunas e formatação se estiver vazia
+ */
+function getOrCreateSheetWithHeaders(ss, cfgKey) {
+  var cfg = SHEET_CONFIG[cfgKey];
+  if (!cfg) return ss.getActiveSheet();
+
+  var sheet = null;
+  for (var a = 0; a < cfg.aliases.length; a++) {
+    sheet = ss.getSheetByName(cfg.aliases[a]);
+    if (sheet) break;
+  }
+
+  if (!sheet) {
+    sheet = ss.insertSheet(cfg.name);
+  }
+
+  // Se a aba estiver sem cabeçalho, cria e formata
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(cfg.headers);
+    formatHeaderRow(sheet, cfg.headers.length);
+  }
+
   return sheet;
 }
 
+/**
+ * Aplica estilo profissional ao cabeçalho (Verde Papoula #114b30, texto branco em negrito e linha congelada)
+ */
+function formatHeaderRow(sheet, numCols) {
+  try {
+    var range = sheet.getRange(1, 1, 1, numCols);
+    range.setFontWeight("bold");
+    range.setBackground("#114b30");
+    range.setFontColor("#ffffff");
+    range.setFontSize(10);
+    sheet.setFrozenRows(1);
+    for (var col = 1; col <= numCols; col++) {
+      sheet.autoResizeColumn(col);
+    }
+  } catch (e) {}
+}
+
+/**
+ * Cria e formata todas as abas necessárias de uma só vez
+ */
+function setupAllTabs(ss) {
+  getOrCreateSheetWithHeaders(ss, "produtos");
+  getOrCreateSheetWithHeaders(ss, "categorias");
+  getOrCreateSheetWithHeaders(ss, "pedidos");
+  getOrCreateSheetWithHeaders(ss, "clientes");
+}
+
+/**
+ * Adiciona menu no Google Sheets ao abrir a planilha
+ */
+function onOpen() {
+  var ui = SpreadsheetApp.getUi();
+  ui.createMenu("🌸 Floricultura Papoula")
+    .addItem("⚡ Criar e Atualizar Todas as Abas", "manualSetup")
+    .addToUi();
+}
+
+function manualSetup() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  setupAllTabs(ss);
+  SpreadsheetApp.getUi().alert("Abas 'Produtos', 'Categorias', 'Pedidos' e 'Clientes' configuradas com sucesso!");
+}
+
+/**
+ * Recebe comandos de sincronização e novos pedidos via POST
+ */
 function doPost(e) {
   var lock = LockService.getScriptLock();
-  lock.tryLock(15000);
+  lock.tryLock(20000);
   
   try {
     var contents = e.postData ? e.postData.contents : "";
@@ -1155,84 +1263,171 @@ function doPost(e) {
     }
 
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    
+    // Garante que todas as abas e colunas existam
+    setupAllTabs(ss);
 
-    // 1. AÇÃO: Sincronizar Catálogo de Produtos na Aba "Catalogo"
+    // 1. AÇÃO: Sincronizar Tudo de uma só vez (Produtos, Categorias, Pedidos, Clientes)
+    if (data.action === "syncAll" || data.initTabs === true) {
+      // Sincroniza Produtos
+      if (data.products && Array.isArray(data.products)) {
+        var sProd = getOrCreateSheetWithHeaders(ss, "produtos");
+        sProd.clearContents();
+        sProd.appendRow(SHEET_CONFIG.produtos.headers);
+        formatHeaderRow(sProd, SHEET_CONFIG.produtos.headers.length);
+
+        for (var pa = 0; pa < data.products.length; pa++) {
+          var pr = data.products[pa];
+          sProd.appendRow([
+            pr.id || "",
+            pr.name || "",
+            pr.slug || "",
+            pr.category || "",
+            pr.price !== undefined && pr.price !== null ? pr.price : "",
+            pr.referencePrice !== undefined && pr.referencePrice !== null ? pr.referencePrice : "",
+            pr.originalPrice !== undefined && pr.originalPrice !== null ? pr.originalPrice : "",
+            pr.isPriceOnDemand ? "Sim" : "Nao",
+            Array.isArray(pr.occasion) ? pr.occasion.join(", ") : (pr.occasion || ""),
+            Array.isArray(pr.flowerType) ? pr.flowerType.join(", ") : (pr.flowerType || ""),
+            pr.imageUrl || "",
+            pr.description || "",
+            pr.details && pr.details.itemsIncluded ? pr.details.itemsIncluded.join("; ") : "",
+            pr.details && pr.details.careInstructions ? pr.details.careInstructions : "",
+            Array.isArray(pr.tags) ? pr.tags.join(", ") : (pr.tags || ""),
+            pr.rating || 5,
+            pr.reviewCount || 0,
+            pr.inStock !== false ? "Sim" : "Nao",
+            pr.orderCount || 0
+          ]);
+        }
+      }
+
+      // Sincroniza Categorias
+      if (data.categories && Array.isArray(data.categories)) {
+        var sCatg = getOrCreateSheetWithHeaders(ss, "categorias");
+        sCatg.clearContents();
+        sCatg.appendRow(SHEET_CONFIG.categorias.headers);
+        formatHeaderRow(sCatg, SHEET_CONFIG.categorias.headers.length);
+
+        for (var ca = 0; ca < data.categories.length; ca++) {
+          var ci = data.categories[ca];
+          sCatg.appendRow([
+            ci.id || ci.slug || "",
+            ci.name || "",
+            ci.icon || "🌸",
+            ci.description || "",
+            ci.active !== false ? "Sim" : "Nao"
+          ]);
+        }
+      }
+
+      // Sincroniza Pedidos
+      if (data.orders && Array.isArray(data.orders) && data.orders.length > 0) {
+        var sPed = getOrCreateSheetWithHeaders(ss, "pedidos");
+        sPed.clearContents();
+        sPed.appendRow(SHEET_CONFIG.pedidos.headers);
+        formatHeaderRow(sPed, SHEET_CONFIG.pedidos.headers.length);
+
+        for (var oa = 0; oa < data.orders.length; oa++) {
+          var ord = data.orders[oa];
+          sPed.appendRow([
+            ord.orderNumber || ord.id || "",
+            ord.createdAt || new Date().toISOString(),
+            ord.customerName || "Cliente",
+            ord.customerPhone || "",
+            ord.customerBirthDate || "",
+            ord.productName || "Arranjo Floral",
+            ord.category || "Arranjos",
+            ord.referencePrice || ord.price || 0,
+            ord.freightFee || 0,
+            ord.totalPrice || 0,
+            ord.recipientName || ord.customerName || "",
+            ord.recipientPhone || "",
+            ord.deliveryCity || "Pirapora",
+            ord.deliveryAddress || "",
+            ord.deliveryNeighborhood || "",
+            ord.reference || "",
+            ord.deliveryDate || "",
+            ord.timeSlot || "",
+            ord.cardMessage || "",
+            ord.paymentMethod || "PIX",
+            ord.status || "pedido",
+            ord.photoProofUrl || ""
+          ]);
+        }
+      }
+
+      // Sincroniza Clientes
+      if (data.customers && Array.isArray(data.customers) && data.customers.length > 0) {
+        var sCust = getOrCreateSheetWithHeaders(ss, "clientes");
+        sCust.clearContents();
+        sCust.appendRow(SHEET_CONFIG.clientes.headers);
+        formatHeaderRow(sCust, SHEET_CONFIG.clientes.headers.length);
+
+        for (var cu = 0; cu < data.customers.length; cu++) {
+          var cus = data.customers[cu];
+          sCust.appendRow([
+            cus.fullName || "",
+            cus.phone || "",
+            cus.birthDate || "",
+            cus.createdAt || new Date().toLocaleDateString("pt-BR"),
+            cus.totalOrders || 0,
+            cus.notes || ""
+          ]);
+        }
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: "Todas as abas (Produtos, Categorias, Pedidos e Clientes) foram criadas e atualizadas com sucesso na sua Planilha!"
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 2. AÇÃO: Sincronizar apenas Catálogo de Produtos
     if (data.action === "syncCatalog" || data.action === "saveProducts") {
-      var sheetCat = getOrCreateSheet(ss, "Catalogo");
-      sheetCat.clearContents();
+      var sheetProdOnly = getOrCreateSheetWithHeaders(ss, "produtos");
+      sheetProdOnly.clearContents();
+      sheetProdOnly.appendRow(SHEET_CONFIG.produtos.headers);
+      formatHeaderRow(sheetProdOnly, SHEET_CONFIG.produtos.headers.length);
       
-      sheetCat.appendRow([
-        "ID / Codigo",
-        "Nome do Produto",
-        "Slug",
-        "Categoria",
-        "Preco Venda (R$)",
-        "Preco Referencia (R$)",
-        "Preco Original (R$)",
-        "Sob Consulta",
-        "Ocasioes",
-        "Tipos de Flor",
-        "URL da Imagem",
-        "Descricao",
-        "Itens Inclusos",
-        "Instrucoes de Cuidado",
-        "Tags",
-        "Avaliacao",
-        "Total Avaliacoes",
-        "Em Estoque",
-        "Total Pedidos"
-      ]);
-      
-      var products = Array.isArray(data.products) ? data.products : (Array.isArray(data.catalog) ? data.catalog : []);
-      for (var i = 0; i < products.length; i++) {
-        var p = products[i];
-        sheetCat.appendRow([
-          p.id || "",
-          p.name || "",
-          p.slug || "",
-          p.category || "",
+      var prods = Array.isArray(data.products) ? data.products : (Array.isArray(data.catalog) ? data.catalog : []);
+      for (var i = 0; i < prods.length; i++) {
+        var p = prods[i];
+        sheetProdOnly.appendRow([
+          p.id || "", p.name || "", p.slug || "", p.category || "",
           p.price !== undefined && p.price !== null ? p.price : "",
           p.referencePrice !== undefined && p.referencePrice !== null ? p.referencePrice : "",
           p.originalPrice !== undefined && p.originalPrice !== null ? p.originalPrice : "",
           p.isPriceOnDemand ? "Sim" : "Nao",
           Array.isArray(p.occasion) ? p.occasion.join(", ") : (p.occasion || ""),
           Array.isArray(p.flowerType) ? p.flowerType.join(", ") : (p.flowerType || ""),
-          p.imageUrl || "",
-          p.description || "",
+          p.imageUrl || "", p.description || "",
           p.details && p.details.itemsIncluded ? p.details.itemsIncluded.join("; ") : "",
           p.details && p.details.careInstructions ? p.details.careInstructions : "",
           Array.isArray(p.tags) ? p.tags.join(", ") : (p.tags || ""),
-          p.rating || 5,
-          p.reviewCount || 0,
-          p.inStock !== false ? "Sim" : "Nao",
-          p.orderCount || 0
+          p.rating || 5, p.reviewCount || 0,
+          p.inStock !== false ? "Sim" : "Nao", p.orderCount || 0
         ]);
       }
       
       return ContentService.createTextOutput(JSON.stringify({
         success: true,
-        message: "Catálogo com " + products.length + " produtos salvo na aba 'Catalogo'!",
-        count: products.length
+        message: "Aba 'Produtos' atualizada com " + prods.length + " produtos!",
+        count: prods.length
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // 2. AÇÃO: Sincronizar Categorias na Aba "Categorias"
+    // 3. AÇÃO: Sincronizar apenas Categorias
     if (data.action === "syncCategories" || data.action === "saveCategories") {
-      var sheetCateg = getOrCreateSheet(ss, "Categorias");
-      sheetCateg.clearContents();
+      var sheetCatOnly = getOrCreateSheetWithHeaders(ss, "categorias");
+      sheetCatOnly.clearContents();
+      sheetCatOnly.appendRow(SHEET_CONFIG.categorias.headers);
+      formatHeaderRow(sheetCatOnly, SHEET_CONFIG.categorias.headers.length);
       
-      sheetCateg.appendRow([
-        "ID / Slug",
-        "Nome da Categoria",
-        "Icone / Emoji",
-        "Descricao",
-        "Ativo"
-      ]);
-      
-      var categories = Array.isArray(data.categories) ? data.categories : [];
-      for (var j = 0; j < categories.length; j++) {
-        var c = categories[j];
-        sheetCateg.appendRow([
+      var categs = Array.isArray(data.categories) ? data.categories : [];
+      for (var j = 0; j < categs.length; j++) {
+        var c = categs[j];
+        sheetCatOnly.appendRow([
           c.id || c.slug || "",
           c.name || "",
           c.icon || "🌸",
@@ -1243,59 +1438,8 @@ function doPost(e) {
       
       return ContentService.createTextOutput(JSON.stringify({
         success: true,
-        message: "Total de " + categories.length + " categorias salvas na aba 'Categorias'!",
-        count: categories.length
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    // 3. AÇÃO: Sincronizar Tudo de uma vez (Catálogo, Categorias e Pedidos)
-    if (data.action === "syncAll") {
-      if (data.products && Array.isArray(data.products)) {
-        var sCatAll = getOrCreateSheet(ss, "Catalogo");
-        sCatAll.clearContents();
-        sCatAll.appendRow([
-          "ID / Codigo", "Nome do Produto", "Slug", "Categoria", "Preco Venda (R$)",
-          "Preco Referencia (R$)", "Preco Original (R$)", "Sob Consulta", "Ocasioes",
-          "Tipos de Flor", "URL da Imagem", "Descricao", "Itens Inclusos",
-          "Instrucoes de Cuidado", "Tags", "Avaliacao", "Total Avaliacoes", "Em Estoque", "Total Pedidos"
-        ]);
-        for (var pa = 0; pa < data.products.length; pa++) {
-          var pr = data.products[pa];
-          sCatAll.appendRow([
-            pr.id || "", pr.name || "", pr.slug || "", pr.category || "",
-            pr.price !== undefined ? pr.price : "",
-            pr.referencePrice !== undefined ? pr.referencePrice : "",
-            pr.originalPrice !== undefined ? pr.originalPrice : "",
-            pr.isPriceOnDemand ? "Sim" : "Nao",
-            Array.isArray(pr.occasion) ? pr.occasion.join(", ") : (pr.occasion || ""),
-            Array.isArray(pr.flowerType) ? pr.flowerType.join(", ") : (pr.flowerType || ""),
-            pr.imageUrl || "", pr.description || "",
-            pr.details && pr.details.itemsIncluded ? pr.details.itemsIncluded.join("; ") : "",
-            pr.details && pr.details.careInstructions ? pr.details.careInstructions : "",
-            Array.isArray(pr.tags) ? pr.tags.join(", ") : (pr.tags || ""),
-            pr.rating || 5, pr.reviewCount || 0,
-            pr.inStock !== false ? "Sim" : "Nao", pr.orderCount || 0
-          ]);
-        }
-      }
-
-      if (data.categories && Array.isArray(data.categories)) {
-        var sCatgAll = getOrCreateSheet(ss, "Categorias");
-        sCatgAll.clearContents();
-        sCatgAll.appendRow(["ID / Slug", "Nome da Categoria", "Icone / Emoji", "Descricao", "Ativo"]);
-        for (var ca = 0; ca < data.categories.length; ca++) {
-          var ciItem = data.categories[ca];
-          sCatgAll.appendRow([
-            ciItem.id || ciItem.slug || "", ciItem.name || "",
-            ciItem.icon || "🌸", ciItem.description || "",
-            ciItem.active !== false ? "Sim" : "Nao"
-          ]);
-        }
-      }
-
-      return ContentService.createTextOutput(JSON.stringify({
-        success: true,
-        message: "Catálogo e Categorias atualizados com sucesso na Planilha!"
+        message: "Aba 'Categorias' atualizada com " + categs.length + " categorias!",
+        count: categs.length
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -1305,19 +1449,10 @@ function doPost(e) {
     }
 
     // 5. PADRÃO: Novo Pedido recebido -> Salvar na Aba "Pedidos"
-    var sheetPedidos = getOrCreateSheet(ss, "Pedidos");
-    if (sheetPedidos.getLastRow() === 0) {
-      sheetPedidos.appendRow([
-        "Numero Pedido", "Data Criacao", "Cliente / Remetente", "WhatsApp Cliente",
-        "Aniversario Cliente", "Produto / Arranjo", "Categoria", "Preco Referencia Item (R$)",
-        "Custo de Frete (R$)", "Valor Total Estimado (R$)", "Destinatario", "Telefone Destinatario",
-        "Cidade de Entrega", "Endereco Completo", "Bairro", "Ponto de Referencia",
-        "Data de Entrega", "Horario", "Mensagem do Cartao", "Forma Pagamento", "Status Kanban", "Foto Conclusao"
-      ]);
-    }
+    var sheetPedDefault = getOrCreateSheetWithHeaders(ss, "pedidos");
 
     var orderNum = data.orderNumber || ("#PAP-" + Math.floor(1000 + Math.random() * 9000));
-    var createdAt = data.createdAt || new Date();
+    var createdAt = data.createdAt || new Date().toISOString();
     var customerName = data.senderName || data.customerName || "Cliente";
     var customerPhone = data.senderPhone || data.customerPhone || "";
     var customerBirthDate = data.customerBirthDate || data.senderBirthDate || "";
@@ -1339,7 +1474,7 @@ function doPost(e) {
     var status = data.status || "pedido";
     var photoProof = data.photoProofUrl || "";
 
-    sheetPedidos.appendRow([
+    sheetPedDefault.appendRow([
       orderNum, createdAt, customerName, customerPhone, customerBirthDate,
       productName, category, refPrice, freightFee, totalPrice,
       recipientName, recipientPhone, city, address, neighborhood, reference,
@@ -1362,9 +1497,13 @@ function doPost(e) {
   }
 }
 
+/**
+ * Lê pedidos, catálogo de produtos e categorias via GET
+ */
 function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
+    setupAllTabs(ss);
     
     // Leitura dos Pedidos
     var sheetPedidos = ss.getSheetByName("Pedidos") || ss.getActiveSheet();
@@ -1436,9 +1575,9 @@ function doGet(e) {
       }
     }
 
-    // Leitura do Catálogo (se existir a aba "Catalogo")
+    // Leitura dos Produtos (procura aba "Produtos" ou "Catalogo")
     var catalog = [];
-    var sheetCatalogo = ss.getSheetByName("Catalogo");
+    var sheetCatalogo = ss.getSheetByName("Produtos") || ss.getSheetByName("Catalogo");
     if (sheetCatalogo && sheetCatalogo.getDataRange().getValues().length > 1) {
       var rowsC = sheetCatalogo.getDataRange().getValues();
       for (var c = 1; c < rowsC.length; c++) {
@@ -1470,7 +1609,7 @@ function doGet(e) {
       }
     }
 
-    // Leitura das Categorias (se existir a aba "Categorias")
+    // Leitura das Categorias
     var categories = [];
     var sheetCategorias = ss.getSheetByName("Categorias");
     if (sheetCategorias && sheetCategorias.getDataRange().getValues().length > 1) {

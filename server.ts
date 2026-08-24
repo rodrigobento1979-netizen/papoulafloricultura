@@ -198,16 +198,23 @@ app.post("/api/sync-sheets", async (req, res) => {
       }
     }
 
-    // Strategy 2: If we have a Google Sheet ID, fetch direct CSV export
+    // Strategy 2: If we have a Google Sheet ID, fetch direct CSV export from all relevant sheets
     if (directSheetId) {
-      const csvUrls = [
-        `https://docs.google.com/spreadsheets/d/${directSheetId}/export?format=csv&id=${directSheetId}`,
-        `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv`,
+      const sheetsToFetch = [
+        { name: "default", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/export?format=csv&id=${directSheetId}` },
+        { name: "pedidos", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Pedidos` },
+        { name: "produtos", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Produtos` },
+        { name: "catalogo", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Catalogo` },
+        { name: "categorias", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Categorias` },
       ];
 
-      for (const csvUrl of csvUrls) {
+      let rawCSV = "";
+      let productsCSV = "";
+      let categoriesCSV = "";
+
+      for (const s of sheetsToFetch) {
         try {
-          const csvRes = await fetch(csvUrl, {
+          const csvRes = await fetch(s.url, {
             method: "GET",
             headers: {
               "Accept": "text/csv, text/plain, */*",
@@ -217,22 +224,34 @@ app.post("/api/sync-sheets", async (req, res) => {
           });
 
           if (csvRes.ok) {
-            const csvText = await csvRes.text();
+            const text = await csvRes.text();
             if (
-              !csvText.includes("accounts.google.com") &&
-              !csvText.includes("ServiceLogin") &&
-              csvText.trim().length > 10
+              !text.includes("accounts.google.com") &&
+              !text.includes("ServiceLogin") &&
+              text.trim().length > 10
             ) {
-              return res.json({
-                success: true,
-                rawCSV: csvText,
-                source: "google_sheets_csv",
-              });
+              if (s.name === "default" || s.name === "pedidos") {
+                if (!rawCSV) rawCSV = text;
+              } else if (s.name === "produtos" || s.name === "catalogo") {
+                if (!productsCSV) productsCSV = text;
+              } else if (s.name === "categorias") {
+                if (!categoriesCSV) categoriesCSV = text;
+              }
             }
           }
         } catch (csvErr) {
-          console.warn(`Failed fetching CSV from ${csvUrl}:`, csvErr);
+          console.warn(`Failed fetching CSV from ${s.url}:`, csvErr);
         }
+      }
+
+      if (rawCSV || productsCSV || categoriesCSV) {
+        return res.json({
+          success: true,
+          rawCSV: rawCSV || undefined,
+          productsCSV: productsCSV || undefined,
+          categoriesCSV: categoriesCSV || undefined,
+          source: "google_sheets_csv",
+        });
       }
     }
 

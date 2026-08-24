@@ -397,11 +397,11 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
               <h3 className="font-serif font-bold text-lg text-stone-900 flex items-center gap-2">
                 <span>Banco de Dados & Google Drive (Multi-Abas)</span>
                 <span className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded-full">
-                  Pedidos • Catálogo • Categorias
+                  Produtos • Categorias • Pedidos • Clientes
                 </span>
               </h3>
               <p className="text-xs text-stone-500">
-                Sincronize pedidos, catálogo de arranjos e categorias em abas automáticas na sua Planilha Google.
+                Sincronize produtos, categorias, pedidos e clientes com criação automática de abas e colunas na sua Planilha Google.
               </p>
             </div>
           </div>
@@ -439,7 +439,7 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
               <div>
                 <span className="font-bold text-sm block">Sincronização Completa da Floricultura na Planilha</span>
                 <span className="text-xs text-emerald-200 block">
-                  Salva e atualiza as 3 abas ("Pedidos", "Catalogo" e "Categorias") em um único clique.
+                  Cria e atualiza automaticamente as 4 abas ("Produtos", "Categorias", "Pedidos" e "Clientes") com suas colunas formatadas em um único clique.
                 </span>
               </div>
             </div>
@@ -453,7 +453,7 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
               className="px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-emerald-950 rounded-xl font-bold text-xs flex items-center gap-2 shadow-xs cursor-pointer disabled:opacity-50 transition-transform hover:scale-102"
             >
               <RefreshCw className={`w-4 h-4 ${isSyncingAll ? "animate-spin" : ""}`} />
-              <span>{isSyncingAll ? "Sincronizando Tudo..." : "💾 Salvar Tudo na Planilha (Pedidos, Catálogo e Categorias)"}</span>
+              <span>{isSyncingAll ? "Sincronizando e Criando Abas..." : "⚡ Sincronizar Tudo (Cria Abas & Colunas)"}</span>
             </button>
 
             <button
@@ -668,7 +668,7 @@ export const GoogleDriveSettingsModal: React.FC<GoogleDriveSettingsModalProps> =
                 className="w-full px-3.5 py-2 bg-stone-50 border border-stone-300 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-emerald-600/30 font-mono"
               />
               <span className="text-[11px] text-stone-500 block mt-1">
-                Cole a URL do Web App gerada no Google Apps Script para sincronizar automaticamente as abas <strong>Pedidos</strong>, <strong>Catalogo</strong> e <strong>Categorias</strong>.
+                Cole a URL do Web App gerada no Google Apps Script para criar e sincronizar automaticamente as abas <strong>Produtos</strong>, <strong>Categorias</strong>, <strong>Pedidos</strong> e <strong>Clientes</strong>.
               </span>
             </div>
 

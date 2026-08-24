@@ -753,7 +753,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         categories,
         customers
       });
-      showNotification(res.success ? "✅ Sincronização completa realizada! (Abas Pedidos, Catalogo e Categorias atualizadas)" : `⚠️ ${res.message}`);
+      showNotification(res.success ? "✅ Sincronização completa realizada! Abas 'Produtos', 'Categorias', 'Pedidos' e 'Clientes' criadas e atualizadas na planilha." : `⚠️ ${res.message}`);
     } catch (e: any) {
       showNotification("Erro ao sincronizar tudo: " + e.message);
     } finally {
@@ -2712,7 +2712,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         className="w-full py-3 px-3 bg-gradient-to-r from-emerald-800 to-[#114b30] hover:from-emerald-700 hover:to-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all hover:scale-[1.01] disabled:opacity-50"
                       >
                         <RefreshCw className={`w-4 h-4 text-amber-300 ${isSyncingAllData ? "animate-spin" : ""}`} />
-                        <span>{isSyncingAllData ? "Sincronizando Tudo..." : "⚡ Sincronizar Tudo (Catálogo, Categorias e Pedidos)"}</span>
+                        <span>{isSyncingAllData ? "Sincronizando e Criando Abas..." : "⚡ Sincronizar Tudo (Cria Abas & Colunas)"}</span>
                       </button>
 
                       <div className="space-y-2 pt-1">
@@ -2722,7 +2722,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           className="w-full py-2 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-colors"
                         >
                           <Download className="w-4 h-4 text-amber-300" />
-                          <span>📥 Baixar Modelo Oficial Multi-Abas (.CSV)</span>
+                          <span>📥 Baixar Modelo Multi-Abas Oficial (.CSV)</span>
                         </button>
 
                         <div className="grid grid-cols-2 gap-2">
@@ -2730,10 +2730,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             type="button"
                             onClick={handleDownloadCatalogCSV}
                             className="py-2 px-2 bg-stone-50 hover:bg-stone-100 text-stone-800 border border-stone-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                            title="Baixar Catálogo de Produtos em CSV"
+                            title="Baixar Produtos em CSV"
                           >
                             <Download className="w-3.5 h-3.5 text-emerald-700" />
-                            <span>Catálogo CSV ({products.length})</span>
+                            <span>Produtos CSV ({products.length})</span>
                           </button>
 
                           <button
@@ -2768,9 +2768,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                       {/* Instructions for upload */}
                       <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-950 space-y-1.5">
-                        <strong className="block text-amber-900 font-bold">Como funciona a planilha multi-abas:</strong>
-                        <p className="leading-tight">1. A planilha possui 3 abas: <strong>Pedidos</strong>, <strong>Catalogo</strong> e <strong>Categorias</strong>.</p>
-                        <p className="leading-tight">2. Ao salvar ou usar o Webhook, todas as alterações são salvas diretamente nas respectivas abas.</p>
+                        <strong className="block text-amber-900 font-bold">✨ Estrutura Multi-Abas Automática:</strong>
+                        <p className="leading-tight">A sincronização cria e organiza 4 abas automaticamente:</p>
+                        <ul className="list-disc pl-4 space-y-0.5 text-[10px]">
+                          <li><strong>Produtos:</strong> Catálogo de itens, preços, estoque e fotos</li>
+                          <li><strong>Categorias:</strong> Categorias com ícones e status</li>
+                          <li><strong>Pedidos:</strong> Entregas e dados do WhatsApp</li>
+                          <li><strong>Clientes:</strong> Base de contatos e aniversários</li>
+                        </ul>
                       </div>
                     </div>
 
