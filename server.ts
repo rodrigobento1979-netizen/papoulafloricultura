@@ -83,11 +83,19 @@ app.post("/api/sync-sheets", async (req, res) => {
 
     // Helper to extract Google Sheet ID
     const extractSheetId = (str: string): string | null => {
+      if (!str) return null;
       const match = str.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-      return match ? match[1] : null;
+      if (match) return match[1];
+      if (!str.startsWith("http") && str.length > 20 && !str.includes("/")) {
+        return str.trim();
+      }
+      return null;
     };
 
-    const directSheetId = extractSheetId(target) || extractSheetId(folder) || (sheetId && !sheetId.startsWith("http") ? sheetId : null);
+    const directSheetId =
+      extractSheetId(target) ||
+      extractSheetId(sheetId) ||
+      extractSheetId(folder);
 
     // Strategy 1: If it is a Google Apps Script Web App URL
     if (target.includes("script.google.com")) {
@@ -203,12 +211,17 @@ app.post("/api/sync-sheets", async (req, res) => {
       const sheetsToFetch = [
         { name: "default", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/export?format=csv&id=${directSheetId}` },
         { name: "pedidos", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Pedidos` },
+        { name: "pedidos_papoula", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Planilha_Pedidos_Floricultura_Papoula` },
+        { name: "pedidos_papoula2", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Planilha_Pedidos` },
+        { name: "vendas", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Vendas` },
         { name: "produtos", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Produtos` },
         { name: "catalogo", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Catalogo` },
         { name: "categorias", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Categorias` },
+        { name: "clientes", url: `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv&sheet=Clientes` },
       ];
 
       let rawCSV = "";
+      const rawCSVs: string[] = [];
       let productsCSV = "";
       let categoriesCSV = "";
 
@@ -230,8 +243,24 @@ app.post("/api/sync-sheets", async (req, res) => {
               !text.includes("ServiceLogin") &&
               text.trim().length > 10
             ) {
-              if (s.name === "default" || s.name === "pedidos") {
-                if (!rawCSV) rawCSV = text;
+              if (
+                s.name === "default" ||
+                s.name === "pedidos" ||
+                s.name === "pedidos_papoula" ||
+                s.name === "pedidos_papoula2" ||
+                s.name === "vendas"
+              ) {
+                // If it looks like orders (has Numero Pedido, Cliente, or similar)
+                if (
+                  text.includes("Pedido") ||
+                  text.includes("Cliente") ||
+                  text.includes("Produto") ||
+                  text.includes("TESTE") ||
+                  text.includes("PAP-")
+                ) {
+                  rawCSVs.push(text);
+                  if (!rawCSV) rawCSV = text;
+                }
               } else if (s.name === "produtos" || s.name === "catalogo") {
                 if (!productsCSV) productsCSV = text;
               } else if (s.name === "categorias") {
@@ -244,10 +273,11 @@ app.post("/api/sync-sheets", async (req, res) => {
         }
       }
 
-      if (rawCSV || productsCSV || categoriesCSV) {
+      if (rawCSV || rawCSVs.length > 0 || productsCSV || categoriesCSV) {
         return res.json({
           success: true,
           rawCSV: rawCSV || undefined,
+          rawCSVs: rawCSVs.length > 1 ? rawCSVs : undefined,
           productsCSV: productsCSV || undefined,
           categoriesCSV: categoriesCSV || undefined,
           source: "google_sheets_csv",

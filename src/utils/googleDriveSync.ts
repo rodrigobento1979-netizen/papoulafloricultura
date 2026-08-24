@@ -316,6 +316,14 @@ export async function fetchStoreDataFromGoogleSheets(
             status: o.status || "pedido",
             paymentMethod: o.paymentMethod || "pix",
           }));
+        } else if (Array.isArray(data.rawCSVs) && data.rawCSVs.length > 0) {
+          let mergedOrders: KanbanOrder[] = [];
+          for (const csv of data.rawCSVs) {
+            const parsed = parseOrdersFromCSV(csv);
+            const { merged } = mergeOrders(mergedOrders, parsed);
+            mergedOrders = merged;
+          }
+          orders = mergedOrders;
         } else if (data.rawCSV) {
           orders = parseOrdersFromCSV(data.rawCSV);
         }
@@ -435,6 +443,14 @@ export async function fetchOrdersFromGoogleSheets(
           paymentMethod: o.paymentMethod || "pix",
         }));
         return { success: true, orders: normalized };
+      } else if (data.success && Array.isArray(data.rawCSVs) && data.rawCSVs.length > 0) {
+        let mergedOrders: KanbanOrder[] = [];
+        for (const csv of data.rawCSVs) {
+          const parsed = parseOrdersFromCSV(csv);
+          const { merged } = mergeOrders(mergedOrders, parsed);
+          mergedOrders = merged;
+        }
+        return { success: true, orders: mergedOrders };
       } else if (data.success && data.rawCSV) {
         const parsed = parseOrdersFromCSV(data.rawCSV);
         return { success: true, orders: parsed };
@@ -1159,7 +1175,15 @@ var SHEET_CONFIG = {
   },
   pedidos: {
     name: "Pedidos",
-    aliases: ["Pedidos", "Vendas"],
+    aliases: [
+      "Pedidos",
+      "Planilha_Pedidos_Floricultura_Papoula",
+      "Planilha_Pedidos",
+      "Vendas",
+      "Página1",
+      "Página 1",
+      "Sheet1"
+    ],
     headers: [
       "Numero Pedido", "Data Criacao", "Cliente / Remetente", "WhatsApp Cliente",
       "Aniversario Cliente", "Produto / Arranjo", "Categoria", "Preco Referencia Item (R$)",
@@ -1505,73 +1529,124 @@ function doGet(e) {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     setupAllTabs(ss);
     
-    // Leitura dos Pedidos
-    var sheetPedidos = ss.getSheetByName("Pedidos") || ss.getActiveSheet();
+    // Leitura dos Pedidos em TODAS as abas de pedidos existentes (evita perder dados)
     var orders = [];
-    var rowsP = sheetPedidos.getDataRange().getValues();
-    if (rowsP.length > 1) {
-      var headersP = rowsP[0].map(function(h) { return h.toString().toLowerCase(); });
-      
-      var idxOrderNum = headersP.indexOf("numero pedido");
-      if (idxOrderNum === -1) idxOrderNum = 0;
-      var idxDate = headersP.indexOf("data criacao");
-      if (idxDate === -1) idxDate = 1;
-      var idxCustomer = headersP.indexOf("cliente / remetente");
-      if (idxCustomer === -1) idxCustomer = headersP.indexOf("cliente");
-      if (idxCustomer === -1) idxCustomer = 2;
-      var idxPhone = headersP.indexOf("whatsapp cliente");
-      if (idxPhone === -1) idxPhone = headersP.indexOf("whatsapp");
-      if (idxPhone === -1) idxPhone = 3;
-      var idxBirth = headersP.indexOf("aniversario cliente");
-      if (idxBirth === -1) idxBirth = 4;
-      var idxProd = headersP.indexOf("produto / arranjo");
-      if (idxProd === -1) idxProd = headersP.indexOf("produto");
-      if (idxProd === -1) idxProd = 5;
-      var idxCat = headersP.indexOf("categoria");
-      if (idxCat === -1) idxCat = 6;
-      var idxRefPrice = headersP.indexOf("preco referencia item (r$)");
-      if (idxRefPrice === -1) idxRefPrice = 7;
-      var idxFreight = headersP.indexOf("custo de frete (r$)");
-      if (idxFreight === -1) idxFreight = 8;
-      var idxTotal = headersP.indexOf("valor total estimado (r$)");
-      if (idxTotal === -1) idxTotal = 9;
-      var idxAddress = headersP.indexOf("endereco completo");
-      if (idxAddress === -1) idxAddress = headersP.indexOf("endereco de entrega");
-      if (idxAddress === -1) idxAddress = 13;
-      var idxCity = headersP.indexOf("cidade de entrega");
-      if (idxCity === -1) idxCity = headersP.indexOf("cidade");
-      if (idxCity === -1) idxCity = 12;
-      var idxDelDate = headersP.indexOf("data de entrega");
-      if (idxDelDate === -1) idxDelDate = 16;
-      var idxCard = headersP.indexOf("mensagem do cartao");
-      if (idxCard === -1) idxCard = 18;
-      var idxPay = headersP.indexOf("forma pagamento");
-      if (idxPay === -1) idxPay = 19;
-      var idxStat = headersP.indexOf("status kanban");
-      if (idxStat === -1) idxStat = 20;
+    var seenOrderNumbers = {};
+    var allSheets = ss.getSheets();
 
-      for (var p = 1; p < rowsP.length; p++) {
-        var row = rowsP[p];
-        if (!row[0] && !row[1] && !row[2]) continue;
-        orders.push({
-          id: "sheet-order-" + p + "-" + (row[idxOrderNum] || ""),
-          orderNumber: row[idxOrderNum] ? row[idxOrderNum].toString() : ("#PAP-" + (1000 + p)),
-          createdAt: row[idxDate] ? row[idxDate].toString() : new Date().toISOString(),
-          customerName: row[idxCustomer] ? row[idxCustomer].toString() : "Cliente",
-          customerPhone: row[idxPhone] ? row[idxPhone].toString() : "",
-          customerBirthDate: row[idxBirth] ? row[idxBirth].toString() : "",
-          productName: row[idxProd] ? row[idxProd].toString() : "Arranjo Floral",
-          category: row[idxCat] ? row[idxCat].toString() : "Arranjos",
-          referencePrice: Number(row[idxRefPrice]) || 0,
-          freightFee: Number(row[idxFreight]) || 0,
-          totalPrice: Number(row[idxTotal]) || 0,
-          deliveryAddress: row[idxAddress] ? row[idxAddress].toString() : "",
-          deliveryCity: row[idxCity] ? row[idxCity].toString() : "Pirapora",
-          deliveryDate: row[idxDelDate] ? row[idxDelDate].toString() : "",
-          cardMessage: row[idxCard] ? row[idxCard].toString() : "",
-          paymentMethod: row[idxPay] ? row[idxPay].toString().toLowerCase() : "pix",
-          status: row[idxStat] ? row[idxStat].toString().toLowerCase() : "pedido"
+    for (var sIdx = 0; sIdx < allSheets.length; sIdx++) {
+      var currSheet = allSheets[sIdx];
+      var sName = currSheet.getName().toLowerCase().trim();
+
+      // Pula abas de catálogo, categorias e clientes
+      if (
+        sName === "produtos" ||
+        sName === "catalogo" ||
+        sName === "catálogo" ||
+        sName === "categorias" ||
+        sName === "clientes"
+      ) {
+        continue;
+      }
+
+      var rowsP = currSheet.getDataRange().getValues();
+      if (rowsP.length > 1) {
+        var headersP = rowsP[0].map(function (h) {
+          return h.toString().toLowerCase().trim();
         });
+
+        var idxOrderNum = headersP.indexOf("numero pedido");
+        if (idxOrderNum === -1) idxOrderNum = headersP.indexOf("pedido");
+        if (idxOrderNum === -1) idxOrderNum = 0;
+
+        var idxDate = headersP.indexOf("data criacao");
+        if (idxDate === -1) idxDate = headersP.indexOf("data");
+        if (idxDate === -1) idxDate = 1;
+
+        var idxCustomer = headersP.indexOf("cliente / remetente");
+        if (idxCustomer === -1) idxCustomer = headersP.indexOf("cliente");
+        if (idxCustomer === -1) idxCustomer = 2;
+
+        var idxPhone = headersP.indexOf("whatsapp cliente");
+        if (idxPhone === -1) idxPhone = headersP.indexOf("whatsapp");
+        if (idxPhone === -1) idxPhone = 3;
+
+        var idxBirth = headersP.indexOf("aniversario cliente");
+        if (idxBirth === -1) idxBirth = headersP.indexOf("aniversario");
+        if (idxBirth === -1) idxBirth = 4;
+
+        var idxProd = headersP.indexOf("produto / arranjo");
+        if (idxProd === -1) idxProd = headersP.indexOf("produto");
+        if (idxProd === -1) idxProd = 5;
+
+        var idxCat = headersP.indexOf("categoria");
+        if (idxCat === -1) idxCat = 6;
+
+        var idxRefPrice = headersP.indexOf("preco referencia item (r$)");
+        if (idxRefPrice === -1) idxRefPrice = headersP.indexOf("preco referencia");
+        if (idxRefPrice === -1) idxRefPrice = 7;
+
+        var idxFreight = headersP.indexOf("custo de frete (r$)");
+        if (idxFreight === -1) idxFreight = headersP.indexOf("frete");
+        if (idxFreight === -1) idxFreight = 8;
+
+        var idxTotal = headersP.indexOf("valor total estimado (r$)");
+        if (idxTotal === -1) idxTotal = headersP.indexOf("total");
+        if (idxTotal === -1) idxTotal = 9;
+
+        var idxAddress = headersP.indexOf("endereco completo");
+        if (idxAddress === -1) idxAddress = headersP.indexOf("endereco de entrega");
+        if (idxAddress === -1) idxAddress = headersP.indexOf("endereco");
+        if (idxAddress === -1) idxAddress = 13;
+
+        var idxCity = headersP.indexOf("cidade de entrega");
+        if (idxCity === -1) idxCity = headersP.indexOf("cidade");
+        if (idxCity === -1) idxCity = 12;
+
+        var idxDelDate = headersP.indexOf("data de entrega");
+        if (idxDelDate === -1) idxDelDate = 16;
+
+        var idxCard = headersP.indexOf("mensagem do cartao");
+        if (idxCard === -1) idxCard = 18;
+
+        var idxPay = headersP.indexOf("forma pagamento");
+        if (idxPay === -1) idxPay = 19;
+
+        var idxStat = headersP.indexOf("status kanban");
+        if (idxStat === -1) idxStat = headersP.indexOf("status");
+        if (idxStat === -1) idxStat = 20;
+
+        for (var p = 1; p < rowsP.length; p++) {
+          var row = rowsP[p];
+          if (!row[0] && !row[1] && !row[2] && !row[5]) continue;
+
+          var orderNumVal = row[idxOrderNum] ? row[idxOrderNum].toString().trim() : ("#PAP-" + (1000 + p));
+          if (!orderNumVal || orderNumVal === "") continue;
+
+          var dedupeKey = orderNumVal.toLowerCase();
+          if (seenOrderNumbers[dedupeKey]) continue;
+          seenOrderNumbers[dedupeKey] = true;
+
+          orders.push({
+            id: "sheet-order-" + sIdx + "-" + p + "-" + orderNumVal.replace(/[^a-zA-Z0-9]/g, ""),
+            orderNumber: orderNumVal,
+            createdAt: row[idxDate] ? row[idxDate].toString() : new Date().toISOString(),
+            customerName: row[idxCustomer] ? row[idxCustomer].toString() : "Cliente",
+            customerPhone: row[idxPhone] ? row[idxPhone].toString() : "",
+            customerBirthDate: row[idxBirth] ? row[idxBirth].toString() : "",
+            productName: row[idxProd] ? row[idxProd].toString() : "Arranjo Floral",
+            category: row[idxCat] ? row[idxCat].toString() : "Arranjos",
+            referencePrice: Number(row[idxRefPrice]) || 0,
+            freightFee: Number(row[idxFreight]) || 0,
+            totalPrice: Number(row[idxTotal]) || (Number(row[idxRefPrice]) || 0) + (Number(row[idxFreight]) || 0),
+            deliveryAddress: row[idxAddress] ? row[idxAddress].toString() : "",
+            deliveryCity: row[idxCity] ? row[idxCity].toString() : "Pirapora",
+            deliveryDate: row[idxDelDate] ? row[idxDelDate].toString() : "",
+            cardMessage: row[idxCard] ? row[idxCard].toString() : "",
+            paymentMethod: row[idxPay] ? row[idxPay].toString().toLowerCase() : "pix",
+            status: row[idxStat] ? row[idxStat].toString().toLowerCase() : "pedido"
+          });
+        }
       }
     }
 
