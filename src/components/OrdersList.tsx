@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { 
   ShoppingBag, 
   Calendar, 
@@ -13,21 +13,32 @@ import {
   Trash2,
   CheckCircle2,
   Clock,
-  Filter
+  Filter,
+  RefreshCw,
+  Upload,
+  AlertCircle
 } from "lucide-react";
-import { KanbanOrder, KanbanOrderStatus, Product } from "../types";
+import { KanbanOrder, KanbanOrderStatus, Product, GoogleDriveConfig } from "../types";
 import { EditOrderModal } from "./EditOrderModal";
 import { WhatsAppOrderModal } from "./WhatsAppOrderModal";
-import { exportOrdersToCSV, downloadCSV } from "../utils/googleDriveSync";
+import { 
+  exportOrdersToCSV, 
+  downloadCSV, 
+  fetchOrdersFromGoogleSheets, 
+  parseOrdersFromCSV, 
+  mergeOrders 
+} from "../utils/googleDriveSync";
 
 type DateFilterType = "all" | "today" | "yesterday" | "last7days" | "this_month" | "custom";
 
 interface OrdersListProps {
   orders: KanbanOrder[];
   products: Product[];
+  googleDriveConfig?: GoogleDriveConfig;
   onUpdateOrderStatus: (orderId: string, status: KanbanOrderStatus, photoUrl?: string) => void;
   onUpdateOrder: (updatedOrder: KanbanOrder) => void;
   onAddOrder: (order: KanbanOrder) => void;
+  onBatchImportOrders?: (orders: KanbanOrder[]) => void;
   onDeleteOrder?: (orderId: string) => void;
   onClearOrders?: () => void;
   onOpenDatabaseSettings?: () => void;
@@ -59,9 +70,11 @@ const STATUS_CONFIG: Record<KanbanOrderStatus, { label: string; badgeBg: string;
 export const OrdersList: React.FC<OrdersListProps> = ({
   orders,
   products,
+  googleDriveConfig,
   onUpdateOrderStatus,
   onUpdateOrder,
   onAddOrder,
+  onBatchImportOrders,
   onDeleteOrder,
   onClearOrders,
   onOpenDatabaseSettings,
@@ -75,6 +88,91 @@ export const OrdersList: React.FC<OrdersListProps> = ({
   // Modals state
   const [editingOrder, setEditingOrder] = useState<KanbanOrder | null>(null);
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+
+  // Sync state
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncToast, setSyncToast] = useState<{
+    type: "success" | "error" | "info";
+    message: string;
+  } | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const showSyncToast = (type: "success" | "error" | "info", message: string) => {
+    setSyncToast({ type, message });
+    setTimeout(() => setSyncToast(null), 5000);
+  };
+
+  const handleSyncFromSheets = async () => {
+    const webhookUrl = googleDriveConfig?.sheetWebhookUrl || "";
+    const spreadsheetId = googleDriveConfig?.spreadsheetId || "";
+    const folderUrl = googleDriveConfig?.folderUrl || "";
+
+    const target = webhookUrl || spreadsheetId || (folderUrl.includes("spreadsheets") ? folderUrl : "");
+
+    if (!target || !target.trim()) {
+      showSyncToast("info", "Abra as configurações do Google Drive para informar a URL do Webhook ou Link da Planilha.");
+      if (onOpenDatabaseSettings) onOpenDatabaseSettings();
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      const result = await fetchOrdersFromGoogleSheets(webhookUrl, spreadsheetId, folderUrl);
+      if (result.success && result.orders.length > 0) {
+        if (onBatchImportOrders) {
+          const { merged, addedCount, updatedCount } = mergeOrders(orders, result.orders);
+          onBatchImportOrders(merged);
+          showSyncToast(
+            "success",
+            `✅ Planilha sincronizada! ${result.orders.length} pedidos carregados (${addedCount} novos, ${updatedCount} atualizados).`
+          );
+        } else {
+          showSyncToast("success", `✅ ${result.orders.length} pedidos encontrados na planilha.`);
+        }
+      } else if (result.success && result.orders.length === 0) {
+        showSyncToast("info", "Planilha conectada com sucesso, mas nenhuma linha de pedido foi encontrada.");
+      } else {
+        showSyncToast(
+          "error",
+          result.message || "Não foi possível carregar os pedidos. Verifique se o Web App está publicado como 'Qualquer Pessoa' (Anyone)."
+        );
+      }
+    } catch (err: any) {
+      showSyncToast("error", err.message || "Erro de conexão ao buscar planilha.");
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const text = evt.target?.result as string;
+        const parsed = parseOrdersFromCSV(text);
+        if (parsed.length > 0) {
+          if (onBatchImportOrders) {
+            const { merged, addedCount, updatedCount } = mergeOrders(orders, parsed);
+            onBatchImportOrders(merged);
+            showSyncToast(
+              "success",
+              `✅ Arquivo CSV importado! ${parsed.length} pedidos lidos (${addedCount} novos, ${updatedCount} atualizados).`
+            );
+          }
+        } else {
+          showSyncToast("error", "Nenhum pedido válido encontrado no arquivo CSV.");
+        }
+      } catch (err: any) {
+        showSyncToast("error", "Erro ao processar arquivo CSV: " + err.message);
+      }
+    };
+    reader.readAsText(file, "UTF-8");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   // Date filter evaluation
   const isOrderMatchingDate = (order: KanbanOrder): boolean => {
@@ -244,6 +342,36 @@ export const OrdersList: React.FC<OrdersListProps> = ({
         </div>
       </div>
 
+      {/* SYNC NOTIFICATION TOAST */}
+      {syncToast && (
+        <div
+          className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between shadow-sm animate-fadeIn ${
+            syncToast.type === "success"
+              ? "bg-emerald-50 border-emerald-200 text-emerald-950"
+              : syncToast.type === "error"
+              ? "bg-rose-50 border-rose-200 text-rose-900"
+              : "bg-blue-50 border-blue-200 text-blue-950"
+          }`}
+        >
+          <div className="flex items-center gap-2">
+            {syncToast.type === "success" ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+            ) : syncToast.type === "error" ? (
+              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+            ) : (
+              <RefreshCw className="w-4 h-4 text-blue-600 shrink-0" />
+            )}
+            <span className="font-medium">{syncToast.message}</span>
+          </div>
+          <button
+            onClick={() => setSyncToast(null)}
+            className="p-1 hover:bg-black/5 rounded-lg text-stone-500 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* FILTER CONTROLS & ACTIONS BAR */}
       <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-xs space-y-3.5">
         
@@ -267,6 +395,36 @@ export const OrdersList: React.FC<OrdersListProps> = ({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Sync from Google Sheets Button */}
+            <button
+              type="button"
+              onClick={handleSyncFromSheets}
+              disabled={isSyncing}
+              className="px-3.5 py-2 bg-[#114b30] hover:bg-[#0c3924] text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-all cursor-pointer hover:scale-102 disabled:opacity-60"
+              title="Puxar pedidos cadastrados na Planilha Google"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin text-amber-300" : "text-amber-300"}`} />
+              <span>{isSyncing ? "Sincronizando..." : "Sincronizar Planilha"}</span>
+            </button>
+
+            {/* Import CSV button */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleCSVUpload}
+              className="hidden"
+            />
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="px-3 py-2 bg-stone-100 hover:bg-emerald-50 text-stone-800 hover:text-emerald-950 border border-stone-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+              title="Importar pedidos de arquivo CSV baixado do Google Drive"
+            >
+              <Upload className="w-3.5 h-3.5 text-emerald-800" />
+              <span>Importar CSV</span>
+            </button>
+
             {/* Create WhatsApp Order button */}
             <button
               onClick={() => setIsWhatsAppModalOpen(true)}
@@ -445,10 +603,56 @@ export const OrdersList: React.FC<OrdersListProps> = ({
             <tbody className="divide-y divide-stone-200">
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="py-12 text-center text-stone-400">
-                    <ShoppingBag className="w-8 h-8 mx-auto mb-2 opacity-30 text-[#114b30]" />
-                    <p className="text-sm font-medium text-stone-600">Nenhum pedido encontrado para o período selecionado.</p>
-                    <p className="text-xs text-stone-400 mt-1">Experimente trocar o filtro de data ou limpar a busca.</p>
+                  <td colSpan={12} className="py-12 px-4 text-center">
+                    <div className="max-w-md mx-auto space-y-3">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-[#114b30] flex items-center justify-center mx-auto shadow-xs">
+                        <ShoppingBag className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <p className="text-sm font-bold text-stone-800">
+                          {orders.length === 0
+                            ? "Nenhum pedido carregado no sistema ainda."
+                            : "Nenhum pedido encontrado para o período selecionado."}
+                        </p>
+                        <p className="text-xs text-stone-500 mt-1">
+                          {orders.length === 0
+                            ? "Sincronize com sua planilha do Google Drive ou importe um arquivo CSV para carregar seus pedidos."
+                            : "Tente selecionar outro filtro de data como 'Todas as Datas' ou 'Este Mês'."}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center justify-center gap-2 pt-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={handleSyncFromSheets}
+                          disabled={isSyncing}
+                          className="px-3.5 py-2 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-60"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin text-amber-300" : "text-amber-300"}`} />
+                          <span>{isSyncing ? "Buscando..." : "Sincronizar com a Planilha"}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Upload className="w-3.5 h-3.5 text-emerald-800" />
+                          <span>Importar CSV</span>
+                        </button>
+
+                        {onOpenDatabaseSettings && (
+                          <button
+                            type="button"
+                            onClick={onOpenDatabaseSettings}
+                            className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-200 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Database className="w-3.5 h-3.5 text-emerald-800" />
+                            <span>Configurações</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ) : (

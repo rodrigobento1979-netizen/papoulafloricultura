@@ -202,6 +202,51 @@ export default function App() {
     } catch (e) {}
   }, [storeConfig]);
 
+  // Automatic Background Synchronization with Google Sheets
+  useEffect(() => {
+    const webhookUrl = googleDriveConfig?.sheetWebhookUrl?.trim() || "";
+    const spreadsheetId = googleDriveConfig?.spreadsheetId?.trim() || "";
+    const folderUrl = googleDriveConfig?.folderUrl?.trim() || "";
+
+    // If no credentials configured, skip auto sync
+    if (!webhookUrl && !spreadsheetId && !folderUrl) return;
+
+    // Run synchronization function
+    const runAutoSync = async (silent = true) => {
+      try {
+        const { fetchOrdersFromGoogleSheets, mergeOrders } = await import("./utils/googleDriveSync");
+        const res = await fetchOrdersFromGoogleSheets(webhookUrl, spreadsheetId, folderUrl);
+        if (res.success && Array.isArray(res.orders) && res.orders.length > 0) {
+          setKanbanOrders((prevOrders) => {
+            const { merged, addedCount, updatedCount } = mergeOrders(prevOrders, res.orders);
+            if (!silent && (addedCount > 0 || updatedCount > 0)) {
+              console.log(`[AutoSync] ${addedCount} novos pedidos adicionados, ${updatedCount} atualizados.`);
+            }
+            return merged;
+          });
+
+          // Update lastSyncedAt timestamp in config
+          setGoogleDriveConfig((prev) => ({
+            ...prev,
+            lastSyncedAt: new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }),
+          }));
+        }
+      } catch (err) {
+        console.warn("[AutoSync] Falha na sincronização em segundo plano:", err);
+      }
+    };
+
+    // 1. Initial automatic sync on mount / app load
+    runAutoSync(true);
+
+    // 2. Periodic sync every 2 minutes if autoSync is true or credentials exist
+    const interval = setInterval(() => {
+      runAutoSync(true);
+    }, 120000); // 2 minutes
+
+    return () => clearInterval(interval);
+  }, [googleDriveConfig.sheetWebhookUrl, googleDriveConfig.spreadsheetId, googleDriveConfig.folderUrl, googleDriveConfig.autoSync]);
+
   // Filters and search state
   const [selectedCategory, setSelectedCategory] = useState<string>("todos");
   const [selectedOccasion, setSelectedOccasion] = useState<string>("todos");
@@ -428,6 +473,11 @@ export default function App() {
     setKanbanOrders((prev) =>
       prev.map((order) => (order.id === updatedOrder.id ? updatedOrder : order))
     );
+  };
+
+  const handleBatchImportOrders = (importedOrders: KanbanOrder[]) => {
+    setKanbanOrders(importedOrders);
+    localStorage.setItem("papoula_kanban_orders", JSON.stringify(importedOrders));
   };
 
   const handleDeleteKanbanOrder = (orderId: string) => {
@@ -677,6 +727,7 @@ export default function App() {
         onAddKanbanOrder={handleAddKanbanOrder}
         onUpdateKanbanOrder={handleUpdateKanbanOrder}
         onDeleteKanbanOrder={handleDeleteKanbanOrder}
+        onBatchImportOrders={handleBatchImportOrders}
         googleDriveConfig={googleDriveConfig}
         onUpdateGoogleDriveConfig={setGoogleDriveConfig}
         storeConfig={storeConfig}

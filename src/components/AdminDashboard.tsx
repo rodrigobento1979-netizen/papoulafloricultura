@@ -76,6 +76,7 @@ interface AdminDashboardProps {
   onAddKanbanOrder: (order: KanbanOrder) => void;
   onUpdateKanbanOrder?: (order: KanbanOrder) => void;
   onDeleteKanbanOrder?: (orderId: string) => void;
+  onBatchImportOrders?: (orders: KanbanOrder[]) => void;
   onClearOrders?: () => void;
   onClearCustomers?: () => void;
   onClearProducts?: () => void;
@@ -136,6 +137,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onAddKanbanOrder,
   onUpdateKanbanOrder,
   onDeleteKanbanOrder,
+  onBatchImportOrders,
   onClearOrders,
   onClearCustomers,
   onClearProducts,
@@ -885,9 +887,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <OrdersList
                 orders={kanbanOrders}
                 products={products}
+                googleDriveConfig={googleDriveConfig}
                 onUpdateOrderStatus={onUpdateOrderStatus}
                 onAddOrder={onAddKanbanOrder}
                 onUpdateOrder={onUpdateKanbanOrder || ((updated) => {})}
+                onBatchImportOrders={onBatchImportOrders}
                 onDeleteOrder={onDeleteKanbanOrder}
                 onClearOrders={onClearOrders}
                 onOpenDatabaseSettings={() => setActiveMenu("database")}
@@ -2486,16 +2490,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                       </div>
 
-                      <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200/80 flex items-center justify-between">
+                      <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200/80 space-y-1.5">
                         <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold text-emerald-950">
                           <input
                             type="checkbox"
                             checked={autoSync}
                             onChange={(e) => setAutoSync(e.target.checked)}
-                            className="w-4 h-4 text-emerald-800 rounded border-stone-300 focus:ring-emerald-500"
+                            className="w-4 h-4 text-emerald-800 rounded border-stone-300 focus:ring-emerald-500 cursor-pointer"
                           />
-                          <span>Sincronizar novos pedidos do WhatsApp instantaneamente com o Google Drive</span>
+                          <span>Sincronização Automática: Carregar pedidos ao entrar no app e a cada 2 min</span>
                         </label>
+                        <p className="text-[11px] text-emerald-800 pl-6.5">
+                          Puxa automaticamente todos os novos pedidos e alterações da sua planilha sempre que você abrir o app, sem necessidade de clicar no botão toda vez.
+                        </p>
                       </div>
 
                       <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
@@ -2922,6 +2929,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         customers={customers}
         config={googleDriveConfig}
         onSaveConfig={onUpdateGoogleDriveConfig}
+        onImportOrders={onBatchImportOrders}
       />
 
       {/* AI Catalog Extractor Modal */}

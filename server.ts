@@ -57,6 +57,169 @@ const fallbackMessages: Record<string, string[]> = {
   ],
 };
 
+// API Endpoint for syncing orders directly from Google Sheets / Apps Script Webhook
+app.post("/api/sync-sheets", async (req, res) => {
+  try {
+    const { url, spreadsheetId, folderUrl } = req.body;
+    let target = (url || "").trim();
+    const sheetId = (spreadsheetId || "").trim();
+    const folder = (folderUrl || "").trim();
+
+    // If target is empty, try folderUrl or spreadsheetId
+    if (!target) {
+      if (folder && folder.includes("spreadsheets")) {
+        target = folder;
+      } else if (sheetId) {
+        target = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
+      }
+    }
+
+    if (!target && !sheetId) {
+      return res.status(400).json({
+        success: false,
+        error: "Informe a URL do Webhook do Google Apps Script ou o Link da Planilha do Google Sheets nas configurações.",
+      });
+    }
+
+    // Helper to extract Google Sheet ID
+    const extractSheetId = (str: string): string | null => {
+      const match = str.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      return match ? match[1] : null;
+    };
+
+    const directSheetId = extractSheetId(target) || extractSheetId(folder) || (sheetId && !sheetId.startsWith("http") ? sheetId : null);
+
+    // Strategy 1: If it is a Google Apps Script Web App URL
+    if (target.includes("script.google.com")) {
+      let scriptUrl = target;
+      if (!scriptUrl.includes("_t=")) {
+        const sep = scriptUrl.includes("?") ? "&" : "?";
+        scriptUrl = `${scriptUrl}${sep}_t=${Date.now()}`;
+      }
+
+      // 1A: Try GET request
+      try {
+        const getRes = await fetch(scriptUrl, {
+          method: "GET",
+          headers: {
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          },
+          redirect: "follow",
+        });
+
+        if (getRes.ok) {
+          const text = await getRes.text();
+          if (!text.includes("accounts.google.com") && !text.includes("ServiceLogin")) {
+            try {
+              const jsonData = JSON.parse(text);
+              if (jsonData && Array.isArray(jsonData.orders)) {
+                return res.json({ success: true, orders: jsonData.orders, count: jsonData.orders.length });
+              } else if (Array.isArray(jsonData)) {
+                return res.json({ success: true, orders: jsonData, count: jsonData.length });
+              }
+            } catch {
+              // Not JSON, continue to POST attempt
+            }
+          }
+        }
+      } catch (getErr) {
+        console.warn("GET to Apps Script failed, trying POST fallback:", getErr);
+      }
+
+      // 1B: Try POST request with action: 'getOrders'
+      try {
+        const postRes = await fetch(target, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/plain, */*",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+          },
+          body: JSON.stringify({ action: "getOrders", method: "list" }),
+          redirect: "follow",
+        });
+
+        if (postRes.ok) {
+          const text = await postRes.text();
+          if (!text.includes("accounts.google.com") && !text.includes("ServiceLogin")) {
+            try {
+              const jsonData = JSON.parse(text);
+              if (jsonData && Array.isArray(jsonData.orders)) {
+                return res.json({ success: true, orders: jsonData.orders, count: jsonData.orders.length });
+              } else if (Array.isArray(jsonData)) {
+                return res.json({ success: true, orders: jsonData, count: jsonData.length });
+              }
+            } catch {
+              // Not JSON
+            }
+          }
+        }
+      } catch (postErr) {
+        console.warn("POST to Apps Script failed:", postErr);
+      }
+    }
+
+    // Strategy 2: If we have a Google Sheet ID, fetch direct CSV export (no Apps Script needed!)
+    if (directSheetId) {
+      const csvUrls = [
+        `https://docs.google.com/spreadsheets/d/${directSheetId}/export?format=csv&id=${directSheetId}`,
+        `https://docs.google.com/spreadsheets/d/${directSheetId}/gviz/tq?tqx=out:csv`,
+      ];
+
+      for (const csvUrl of csvUrls) {
+        try {
+          const csvRes = await fetch(csvUrl, {
+            method: "GET",
+            headers: {
+              "Accept": "text/csv, text/plain, */*",
+              "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            },
+            redirect: "follow",
+          });
+
+          if (csvRes.ok) {
+            const csvText = await csvRes.text();
+            if (
+              !csvText.includes("accounts.google.com") &&
+              !csvText.includes("ServiceLogin") &&
+              csvText.trim().length > 10
+            ) {
+              return res.json({
+                success: true,
+                rawCSV: csvText,
+                source: "google_sheets_csv",
+              });
+            }
+          }
+        } catch (csvErr) {
+          console.warn(`Failed fetching CSV from ${csvUrl}:`, csvErr);
+        }
+      }
+    }
+
+    // If target is an Apps Script and failed, return specific guidance
+    if (target.includes("script.google.com")) {
+      return res.json({
+        success: false,
+        error:
+          "O Google Apps Script não retornou os dados dos pedidos. Certifique-se de que o código no Apps Script contém a função 'doGet' e 'doPost' atualizadas e que a Implantação foi criada como 'Qualquer pessoa' (Anyone). Você também pode colar o link direto da sua Planilha Google Sheets para sincronização instantânea.",
+      });
+    }
+
+    return res.json({
+      success: false,
+      error: "Não foi possível carregar a planilha. Verifique se o link está correto e se o compartilhamento está como 'Qualquer pessoa com o link'.",
+    });
+  } catch (err: any) {
+    console.error("Error in /api/sync-sheets:", err);
+    return res.status(500).json({
+      success: false,
+      error: `Erro ao conectar com a planilha: ${err.message || "Erro desconhecido"}`,
+    });
+  }
+});
+
 // API Endpoint for generating romantic/personalized card dedication
 app.post("/api/generate-card-message", async (req, res) => {
   try {
