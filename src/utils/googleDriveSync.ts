@@ -1,9 +1,20 @@
 import { KanbanOrder, Customer, Product, Category, GoogleDriveConfig } from "../types";
 
 /**
- * Sends single order payload to Google Apps Script Webhook (POST)
+ * =========================================================================
+ * FLORICULTURA PAPOULA - SINCRONIZAÇÃO EM ARQUIVOS JSON NO GOOGLE DRIVE
+ * Armazena pedidos, catálogo e categorias em arquivos:
+ * - pedidos.json
+ * - catalogo.json
+ * - categorias.json
+ * dentro da pasta compartilhada do Google Drive.
+ * =========================================================================
  */
-export async function sendOrderToGoogleSheetsWebhook(
+
+/**
+ * Sends a single order payload to Google Apps Script Web App to be appended into pedidos.json
+ */
+export async function sendOrderToGoogleDrive(
   webhookUrl: string,
   orderData: {
     orderNumber?: string;
@@ -37,7 +48,7 @@ export async function sendOrderToGoogleSheetsWebhook(
   try {
     const cleanUrl = webhookUrl.trim();
     // 1. Try sending via backend proxy
-    const proxyRes = await fetch("/api/sync-sheets", {
+    const proxyRes = await fetch("/api/sync-drive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -56,43 +67,107 @@ export async function sendOrderToGoogleSheetsWebhook(
 
   try {
     const cleanUrl = webhookUrl.trim();
-    // Using no-cors as client-side fallback
+    // Direct client fallback
     await fetch(cleanUrl, {
       method: "POST",
       mode: "no-cors",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify(orderData),
+      body: JSON.stringify({
+        action: "newOrder",
+        ...orderData,
+      }),
     });
     return true;
   } catch (err) {
-    console.warn("Erro ao enviar dados para o Google Sheets Webhook:", err);
+    console.warn("Erro ao enviar dados para o Google Drive JSON Webhook:", err);
     return false;
   }
 }
 
 /**
- * Sends Catalog (Products) to Google Apps Script Webhook (POST) to save into the "Catalogo" sheet
+ * Saves all Orders directly into pedidos.json in the Google Drive folder
  */
-export async function syncCatalogToGoogleSheets(
+export async function saveOrdersToGoogleDrive(
+  webhookUrl: string,
+  orders: KanbanOrder[]
+): Promise<{ success: boolean; message: string }> {
+  if (!webhookUrl || !webhookUrl.trim() || !webhookUrl.startsWith("http")) {
+    return {
+      success: false,
+      message: "URL do Web App do Google Apps Script não informada ou inválida.",
+    };
+  }
+
+  try {
+    const res = await fetch("/api/sync-drive", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: webhookUrl.trim(),
+        action: "saveOrders",
+        orders: orders,
+      }),
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        return {
+          success: true,
+          message: data.message || `Arquivo 'pedidos.json' com ${orders.length} pedidos salvo com sucesso na pasta do Google Drive!`,
+        };
+      }
+    }
+  } catch (backendErr) {
+    console.warn("Backend proxy error on saveOrdersToGoogleDrive:", backendErr);
+  }
+
+  // Direct client fallback
+  try {
+    await fetch(webhookUrl.trim(), {
+      method: "POST",
+      mode: "no-cors",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "saveOrders",
+        orders: orders,
+      }),
+    });
+    return {
+      success: true,
+      message: `Arquivo 'pedidos.json' enviado para atualização na pasta do Google Drive (${orders.length} pedidos)!`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: err.message || "Erro ao salvar pedidos.json no Google Drive.",
+    };
+  }
+}
+
+/**
+ * Saves Catalog (Products) into catalogo.json in the Google Drive folder
+ */
+export async function saveCatalogToGoogleDrive(
   webhookUrl: string,
   products: Product[]
 ): Promise<{ success: boolean; message: string }> {
   if (!webhookUrl || !webhookUrl.trim() || !webhookUrl.startsWith("http")) {
     return {
       success: false,
-      message: "URL do Webhook do Google Apps Script não informada ou inválida.",
+      message: "URL do Web App do Google Apps Script não informada ou inválida.",
     };
   }
 
   try {
-    const res = await fetch("/api/sync-sheets", {
+    const res = await fetch("/api/sync-drive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url: webhookUrl.trim(),
-        action: "syncCatalog",
+        action: "saveCatalog",
         products: products,
       }),
     });
@@ -102,12 +177,12 @@ export async function syncCatalogToGoogleSheets(
       if (data.success) {
         return {
           success: true,
-          message: data.message || `Catálogo com ${products.length} produtos salvo com sucesso na aba 'Catalogo' da sua Planilha!`,
+          message: data.message || `Arquivo 'catalogo.json' com ${products.length} produtos salvo na pasta do Google Drive!`,
         };
       }
     }
   } catch (backendErr) {
-    console.warn("Backend proxy error on syncCatalog, trying direct post:", backendErr);
+    console.warn("Backend proxy error on saveCatalogToGoogleDrive:", backendErr);
   }
 
   // Direct client fallback
@@ -117,43 +192,43 @@ export async function syncCatalogToGoogleSheets(
       mode: "no-cors",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "syncCatalog",
+        action: "saveCatalog",
         products: products,
       }),
     });
     return {
       success: true,
-      message: `Comando de sincronização do catálogo enviado para a Planilha (${products.length} itens)!`,
+      message: `Arquivo 'catalogo.json' enviado para a pasta do Google Drive (${products.length} produtos)!`,
     };
   } catch (err: any) {
     return {
       success: false,
-      message: err.message || "Erro ao sincronizar catálogo com a Planilha.",
+      message: err.message || "Erro ao salvar catálogo no Google Drive.",
     };
   }
 }
 
 /**
- * Sends Categories to Google Apps Script Webhook (POST) to save into the "Categorias" sheet
+ * Saves Categories into categorias.json in the Google Drive folder
  */
-export async function syncCategoriesToGoogleSheets(
+export async function saveCategoriesToGoogleDrive(
   webhookUrl: string,
   categories: Category[]
 ): Promise<{ success: boolean; message: string }> {
   if (!webhookUrl || !webhookUrl.trim() || !webhookUrl.startsWith("http")) {
     return {
       success: false,
-      message: "URL do Webhook do Google Apps Script não informada ou inválida.",
+      message: "URL do Web App do Google Apps Script não informada ou inválida.",
     };
   }
 
   try {
-    const res = await fetch("/api/sync-sheets", {
+    const res = await fetch("/api/sync-drive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url: webhookUrl.trim(),
-        action: "syncCategories",
+        action: "saveCategories",
         categories: categories,
       }),
     });
@@ -163,12 +238,12 @@ export async function syncCategoriesToGoogleSheets(
       if (data.success) {
         return {
           success: true,
-          message: data.message || `Total de ${categories.length} categorias salvas com sucesso na aba 'Categorias' da sua Planilha!`,
+          message: data.message || `Arquivo 'categorias.json' com ${categories.length} categorias salvo na pasta do Google Drive!`,
         };
       }
     }
   } catch (backendErr) {
-    console.warn("Backend proxy error on syncCategories:", backendErr);
+    console.warn("Backend proxy error on saveCategoriesToGoogleDrive:", backendErr);
   }
 
   // Direct client fallback
@@ -178,26 +253,26 @@ export async function syncCategoriesToGoogleSheets(
       mode: "no-cors",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        action: "syncCategories",
+        action: "saveCategories",
         categories: categories,
       }),
     });
     return {
       success: true,
-      message: `Comando de sincronização das categorias enviado para a Planilha (${categories.length} categorias)!`,
+      message: `Arquivo 'categorias.json' enviado para a pasta do Google Drive (${categories.length} categorias)!`,
     };
   } catch (err: any) {
     return {
       success: false,
-      message: err.message || "Erro ao sincronizar categorias com a Planilha.",
+      message: err.message || "Erro ao salvar categorias no Google Drive.",
     };
   }
 }
 
 /**
- * Sends Everything (Orders, Catalog & Categories) to Google Sheets in one batch
+ * Saves All (Orders, Catalog and Categories) into their respective JSON files in the Google Drive folder in 1 batch
  */
-export async function syncAllToGoogleSheets(
+export async function saveAllToGoogleDrive(
   webhookUrl: string,
   data: {
     orders?: KanbanOrder[];
@@ -209,12 +284,12 @@ export async function syncAllToGoogleSheets(
   if (!webhookUrl || !webhookUrl.trim() || !webhookUrl.startsWith("http")) {
     return {
       success: false,
-      message: "URL do Webhook do Google Apps Script não informada.",
+      message: "URL do Web App do Google Apps Script não informada.",
     };
   }
 
   try {
-    const res = await fetch("/api/sync-sheets", {
+    const res = await fetch("/api/sync-drive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -229,12 +304,12 @@ export async function syncAllToGoogleSheets(
       if (respData.success) {
         return {
           success: true,
-          message: respData.message || "Pedidos, Catálogo e Categorias sincronizados com sucesso na Planilha Google!",
+          message: respData.message || "Arquivos pedidos.json, catalogo.json e categorias.json salvos com sucesso na pasta do Google Drive!",
         };
       }
     }
   } catch (err) {
-    console.warn("Backend error on syncAll:", err);
+    console.warn("Backend error on saveAllToGoogleDrive:", err);
   }
 
   // Fallback client POST
@@ -250,49 +325,51 @@ export async function syncAllToGoogleSheets(
     });
     return {
       success: true,
-      message: "Dados de Catálogo, Categorias e Pedidos enviados para a Planilha Google!",
+      message: "Dados de Pedidos, Catálogo e Categorias enviados para os arquivos JSON no Google Drive!",
     };
   } catch (err: any) {
     return {
       success: false,
-      message: err.message || "Erro ao sincronizar tudo com a Planilha.",
+      message: err.message || "Erro ao salvar arquivos JSON no Google Drive.",
     };
   }
 }
 
 /**
- * Fetches all orders, products and categories from Google Sheets Webhook via backend proxy
+ * Fetches all orders, products, and categories from Google Drive JSON files via Web App
  */
-export async function fetchStoreDataFromGoogleSheets(
+export async function fetchStoreDataFromGoogleDrive(
   webhookUrl?: string,
-  spreadsheetId?: string,
-  folderUrl?: string
+  folderUrl?: string,
+  folderId?: string
 ): Promise<{
   success: boolean;
   orders?: KanbanOrder[];
   products?: Product[];
   categories?: Category[];
+  folderName?: string;
+  folderUrl?: string;
   message?: string;
 }> {
   const target = (webhookUrl || "").trim();
-  const sheetId = (spreadsheetId || "").trim();
   const folder = (folderUrl || "").trim();
+  const fId = (folderId || "").trim();
 
-  if (!target && !sheetId && !folder) {
+  if (!target && !folder && !fId) {
     return {
       success: false,
-      message: "Por favor, informe a URL do Webhook do Google Apps Script ou o Link da Planilha nas configurações.",
+      message: "Por favor, configure o link do Web App do Google Apps Script ou o Link da Pasta do Google Drive.",
     };
   }
 
   try {
-    const apiRes = await fetch("/api/sync-sheets", {
+    const apiRes = await fetch("/api/sync-drive", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         url: target,
-        spreadsheetId: sheetId,
         folderUrl: folder,
+        folderId: fId,
         action: "getData",
       }),
     });
@@ -304,10 +381,11 @@ export async function fetchStoreDataFromGoogleSheets(
         let products: Product[] = [];
         let categories: Category[] = [];
 
+        // 1. Process Orders
         if (Array.isArray(data.orders)) {
           orders = data.orders.map((o: any, idx: number) => ({
             ...o,
-            id: o.id || `order-sync-${Date.now()}-${idx}`,
+            id: o.id || `order-drive-${Date.now()}-${idx}`,
             orderNumber: o.orderNumber || `#PAP-${1000 + idx}`,
             createdAt: normalizeDate(o.createdAt),
             referencePrice: Number(o.referencePrice || o.price || 0),
@@ -316,56 +394,44 @@ export async function fetchStoreDataFromGoogleSheets(
             status: o.status || "pedido",
             paymentMethod: o.paymentMethod || "pix",
           }));
-        } else if (Array.isArray(data.rawCSVs) && data.rawCSVs.length > 0) {
-          let mergedOrders: KanbanOrder[] = [];
-          for (const csv of data.rawCSVs) {
-            const parsed = parseOrdersFromCSV(csv);
-            const { merged } = mergeOrders(mergedOrders, parsed);
-            mergedOrders = merged;
-          }
-          orders = mergedOrders;
-        } else if (data.rawCSV) {
-          orders = parseOrdersFromCSV(data.rawCSV);
         }
 
+        // 2. Process Products / Catalog
         if (Array.isArray(data.catalog) || Array.isArray(data.products)) {
           const rawProds = data.catalog || data.products;
-          products = rawProds.map((p: any) => ({
+          products = rawProds.map((p: any, idx: number) => ({
             ...p,
-            id: p.id || `prod-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-            name: p.name || "Produto",
-            slug: p.slug || (p.name ? p.name.toLowerCase().replace(/[^a-z0-9]/g, "-") : "produto"),
+            id: p.id || `prod-${Date.now()}-${idx}`,
+            name: p.name || "Produto Floral",
+            slug: p.slug || (p.name ? p.name.toLowerCase().replace(/[^a-z0-9]/g, "-") : `prod-${idx}`),
             category: p.category || "geral",
-            price: p.price !== undefined && p.price !== "" ? Number(p.price) : undefined,
-            referencePrice: p.referencePrice !== undefined && p.referencePrice !== "" ? Number(p.referencePrice) : undefined,
-            originalPrice: p.originalPrice !== undefined && p.originalPrice !== "" ? Number(p.originalPrice) : undefined,
-            isPriceOnDemand: p.isPriceOnDemand === true || String(p.isPriceOnDemand).toLowerCase() === "sim",
-            imageUrl: p.imageUrl || "https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=800&q=80",
+            price: p.price !== undefined && p.price !== null ? Number(p.price) : 0,
+            referencePrice: p.referencePrice !== undefined && p.referencePrice !== null ? Number(p.referencePrice) : undefined,
+            originalPrice: p.originalPrice !== undefined && p.originalPrice !== null ? Number(p.originalPrice) : undefined,
+            isPriceOnDemand: Boolean(p.isPriceOnDemand || p.price === 0 || p.price === undefined),
+            imageUrl: p.imageUrl || p.image || "https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=800&q=80",
             description: p.description || "",
             details: p.details || { itemsIncluded: [], careInstructions: "" },
             tags: Array.isArray(p.tags) ? p.tags : (typeof p.tags === "string" ? p.tags.split(",").map((t: string) => t.trim()) : []),
             rating: Number(p.rating || 5),
-            reviewCount: Number(p.reviewCount || 0),
-            inStock: p.inStock !== false && String(p.inStock).toLowerCase() !== "nao",
+            reviewCount: Number(p.reviewCount || 10),
+            inStock: p.inStock !== false,
             orderCount: Number(p.orderCount || 10),
             occasion: Array.isArray(p.occasion) ? p.occasion : [],
             flowerType: Array.isArray(p.flowerType) ? p.flowerType : [],
           }));
-        } else if (data.productsCSV) {
-          products = parseCatalogFromCSV(data.productsCSV);
         }
 
+        // 3. Process Categories
         if (Array.isArray(data.categories)) {
-          categories = data.categories.map((c: any) => ({
-            id: c.id || c.slug || `cat-${Date.now()}`,
+          categories = data.categories.map((c: any, idx: number) => ({
+            id: c.id || c.slug || `cat-${Date.now()}-${idx}`,
             name: c.name || "Categoria",
-            slug: c.slug || (c.name ? c.name.toLowerCase().replace(/[^a-z0-9]/g, "-") : "categoria"),
+            slug: c.slug || (c.name ? c.name.toLowerCase().replace(/[^a-z0-9]/g, "-") : `cat-${idx}`),
             icon: c.icon || "🌸",
             description: c.description || "",
-            active: c.active !== false && String(c.active).toLowerCase() !== "nao",
+            active: c.active !== false,
           }));
-        } else if (data.categoriesCSV) {
-          categories = parseCategoriesFromCSV(data.categoriesCSV);
         }
 
         return {
@@ -373,6 +439,9 @@ export async function fetchStoreDataFromGoogleSheets(
           orders,
           products,
           categories,
+          folderName: data.folderName,
+          folderUrl: data.folderUrl,
+          message: data.message,
         };
       } else {
         return {
@@ -380,95 +449,252 @@ export async function fetchStoreDataFromGoogleSheets(
           orders: [],
           products: [],
           categories: [],
-          message: data.error || data.message || "Não foi possível carregar dados da planilha Google.",
+          message: data.error || data.message || "Não foi possível carregar os arquivos JSON do Google Drive.",
         };
       }
     }
   } catch (err: any) {
-    console.warn("fetchStoreDataFromGoogleSheets error:", err);
-  }
-
-  // Fallback to fetchOrdersFromGoogleSheets via backend
-  const ordersResult = await fetchOrdersFromGoogleSheets(target, sheetId, folder);
-  return {
-    success: ordersResult.success,
-    orders: ordersResult.orders,
-    message: ordersResult.message,
-  };
-}
-
-/**
- * Fetches all orders from Google Sheets Webhook or direct Google Sheet via backend proxy
- */
-export async function fetchOrdersFromGoogleSheets(
-  webhookUrl?: string,
-  spreadsheetId?: string,
-  folderUrl?: string
-): Promise<{
-  success: boolean;
-  orders: KanbanOrder[];
-  message?: string;
-}> {
-  const target = (webhookUrl || "").trim();
-  const sheetId = (spreadsheetId || "").trim();
-  const folder = (folderUrl || "").trim();
-
-  if (!target && !sheetId && !folder) {
-    return {
-      success: false,
-      orders: [],
-      message: "Por favor, informe a URL do Webhook do Google Apps Script ou o Link da Planilha nas configurações.",
-    };
-  }
-
-  try {
-    const apiRes = await fetch("/api/sync-sheets", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: target, spreadsheetId: sheetId, folderUrl: folder }),
-    });
-
-    if (apiRes.ok) {
-      const data = await apiRes.json();
-      if (data.success && Array.isArray(data.orders) && data.orders.length > 0) {
-        const normalized = data.orders.map((o: any, idx: number) => ({
-          ...o,
-          id: o.id || `order-sync-${Date.now()}-${idx}`,
-          orderNumber: o.orderNumber || `#PAP-${1000 + idx}`,
-          createdAt: normalizeDate(o.createdAt),
-          referencePrice: Number(o.referencePrice || o.price || 0),
-          freightFee: Number(o.freightFee || o.deliveryFee || 0),
-          totalPrice: Number(o.totalPrice || o.total || (Number(o.referencePrice || 0) + Number(o.freightFee || 0))),
-          status: o.status || "pedido",
-          paymentMethod: o.paymentMethod || "pix",
-        }));
-        return { success: true, orders: normalized };
-      } else if (data.success && Array.isArray(data.rawCSVs) && data.rawCSVs.length > 0) {
-        let mergedOrders: KanbanOrder[] = [];
-        for (const csv of data.rawCSVs) {
-          const parsed = parseOrdersFromCSV(csv);
-          const { merged } = mergeOrders(mergedOrders, parsed);
-          mergedOrders = merged;
-        }
-        return { success: true, orders: mergedOrders };
-      } else if (data.success && data.rawCSV) {
-        const parsed = parseOrdersFromCSV(data.rawCSV);
-        return { success: true, orders: parsed };
-      } else if (data.success && Array.isArray(data.orders) && data.orders.length === 0) {
-        return { success: true, orders: [] };
-      } else if (data.error) {
-        return { success: false, orders: [], message: data.error };
-      }
-    }
-  } catch (backendErr: any) {
-    console.warn("Backend proxy /api/sync-sheets error:", backendErr);
+    console.warn("fetchStoreDataFromGoogleDrive error:", err);
   }
 
   return {
     success: false,
     orders: [],
-    message: "Não foi possível conectar à planilha. Verifique a URL do Webhook e se o Apps Script foi implantado como 'Qualquer pessoa'.",
+    products: [],
+    categories: [],
+    message: "Não foi possível conectar ao Google Drive. Verifique a URL do Web App do Google Apps Script.",
   };
+}
+
+/**
+ * Backward compatibility wrappers
+ */
+export const fetchStoreDataFromGoogleSheets = fetchStoreDataFromGoogleDrive;
+export const sendOrderToGoogleSheetsWebhook = sendOrderToGoogleDrive;
+export const syncCatalogToGoogleSheets = saveCatalogToGoogleDrive;
+export const syncCategoriesToGoogleSheets = saveCategoriesToGoogleDrive;
+export const syncAllToGoogleSheets = saveAllToGoogleDrive;
+
+/**
+ * Generates formatted JSON string for Orders (pedidos.json)
+ */
+export function exportOrdersToJSON(orders: KanbanOrder[]): string {
+  const payload = {
+    appName: "Floricultura Papoula - Sistema de Pedidos",
+    version: "2.0",
+    exportedAt: new Date().toISOString(),
+    totalOrders: orders.length,
+    orders: orders,
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+/**
+ * Generates formatted JSON string for Catalog (catalogo.json)
+ */
+export function exportCatalogToJSON(products: Product[], categories: Category[]): string {
+  const payload = {
+    appName: "Floricultura Papoula - Catálogo Oficial",
+    version: "2.0",
+    exportedAt: new Date().toISOString(),
+    totalProducts: products.length,
+    totalCategories: categories.length,
+    categories: categories,
+    products: products,
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+/**
+ * Generates formatted JSON string for Categories (categorias.json)
+ */
+export function exportCategoriesToJSON(categories: Category[]): string {
+  const payload = {
+    appName: "Floricultura Papoula - Categorias",
+    version: "2.0",
+    exportedAt: new Date().toISOString(),
+    totalCategories: categories.length,
+    categories: categories,
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
+/**
+ * Parses raw JSON string into KanbanOrder array
+ */
+export function parseOrdersFromJSON(jsonString: string): KanbanOrder[] {
+  if (!jsonString || !jsonString.trim()) return [];
+  try {
+    const data = JSON.parse(jsonString);
+    let rawList: any[] = [];
+    if (Array.isArray(data)) {
+      rawList = data;
+    } else if (data && Array.isArray(data.orders)) {
+      rawList = data.orders;
+    } else if (data && Array.isArray(data.pedidos)) {
+      rawList = data.pedidos;
+    }
+
+    return rawList.map((o: any, idx: number) => ({
+      id: o.id || `order-json-${Date.now()}-${idx}`,
+      orderNumber: o.orderNumber || `#PAP-${1000 + idx}`,
+      createdAt: normalizeDate(o.createdAt),
+      customerName: o.customerName || o.clientName || o.nomeCliente || "Cliente",
+      customerPhone: o.customerPhone || o.phone || o.telefone || "",
+      customerBirthDate: o.customerBirthDate || o.birthDate || "",
+      productName: o.productName || o.product || o.nomeProduto || "Arranjo de Flores",
+      category: o.category || o.categoria || "Arranjos",
+      referencePrice: Number(o.referencePrice || o.price || 0),
+      freightFee: Number(o.freightFee || o.deliveryFee || 0),
+      totalPrice: Number(o.totalPrice || o.total || 0),
+      recipientName: o.recipientName || o.destinatario || "",
+      recipientPhone: o.recipientPhone || o.telefoneDestinatario || "",
+      deliveryAddress: o.deliveryAddress || o.address || o.endereco || "",
+      deliveryNeighborhood: o.deliveryNeighborhood || o.neighborhood || o.bairro || "",
+      deliveryCity: o.deliveryCity || o.city || o.cidade || "Pirapora",
+      deliveryReference: o.deliveryReference || o.reference || "",
+      deliveryDate: o.deliveryDate || o.date || "",
+      cardMessage: o.cardMessage || o.message || "",
+      paymentMethod: o.paymentMethod || "pix",
+      status: o.status || "pedido",
+      photoProofUrl: o.photoProofUrl || o.photoUrl || "",
+      completedAt: o.completedAt || undefined,
+    }));
+  } catch (err) {
+    console.error("Erro ao analisar JSON de pedidos:", err);
+    throw new Error("Formato do arquivo JSON de pedidos inválido.");
+  }
+}
+
+/**
+ * Parses raw JSON string into Products & Categories
+ */
+export function parseCatalogFromJSON(jsonString: string): { products: Product[]; categories: Category[] } {
+  if (!jsonString || !jsonString.trim()) return { products: [], categories: [] };
+  try {
+    const data = JSON.parse(jsonString);
+    let rawProducts: any[] = [];
+    let rawCategories: any[] = [];
+
+    if (Array.isArray(data)) {
+      rawProducts = data;
+    } else if (data && typeof data === "object") {
+      if (Array.isArray(data.products)) rawProducts = data.products;
+      else if (Array.isArray(data.produtos)) rawProducts = data.produtos;
+      else if (Array.isArray(data.catalog)) rawProducts = data.catalog;
+
+      if (Array.isArray(data.categories)) rawCategories = data.categories;
+      else if (Array.isArray(data.categorias)) rawCategories = data.categorias;
+    }
+
+    const products: Product[] = rawProducts.map((p: any, idx: number) => ({
+      id: p.id || `prod-${Date.now()}-${idx}`,
+      name: p.name || p.nome || "Produto Floral",
+      slug: p.slug || (p.name ? p.name.toLowerCase().replace(/[^a-z0-9]/g, "-") : `prod-${idx}`),
+      category: p.category || p.categoria || "geral",
+      price: p.price !== undefined && p.price !== null ? Number(p.price) : 0,
+      referencePrice: p.referencePrice !== undefined && p.referencePrice !== null ? Number(p.referencePrice) : undefined,
+      originalPrice: p.originalPrice !== undefined && p.originalPrice !== null ? Number(p.originalPrice) : undefined,
+      isPriceOnDemand: Boolean(p.isPriceOnDemand || p.price === 0 || p.price === undefined),
+      imageUrl: p.imageUrl || p.image || p.foto || "https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=800&q=80",
+      description: p.description || p.descricao || "",
+      details: p.details || {
+        itemsIncluded: Array.isArray(p.itemsIncluded) ? p.itemsIncluded : [],
+        careInstructions: p.careInstructions || "",
+      },
+      tags: Array.isArray(p.tags) ? p.tags : (typeof p.tags === "string" ? p.tags.split(",").map((t: string) => t.trim()) : []),
+      rating: Number(p.rating || 5),
+      reviewCount: Number(p.reviewCount || 10),
+      inStock: p.inStock !== false,
+      orderCount: Number(p.orderCount || 10),
+      occasion: Array.isArray(p.occasion) ? p.occasion : [],
+      flowerType: Array.isArray(p.flowerType) ? p.flowerType : [],
+    }));
+
+    const categories: Category[] = rawCategories.map((c: any, idx: number) => ({
+      id: c.id || c.slug || `cat-${Date.now()}-${idx}`,
+      name: c.name || c.nome || "Categoria",
+      slug: c.slug || (c.name ? c.name.toLowerCase().replace(/[^a-z0-9]/g, "-") : `cat-${idx}`),
+      icon: c.icon || c.icone || "🌸",
+      description: c.description || c.descricao || "",
+      active: c.active !== false,
+    }));
+
+    return { products, categories };
+  } catch (err) {
+    console.error("Erro ao analisar JSON do catálogo:", err);
+    throw new Error("Formato do arquivo JSON do catálogo inválido.");
+  }
+}
+
+/**
+ * Parses raw JSON string into Categories
+ */
+export function parseCategoriesFromJSON(jsonString: string): Category[] {
+  if (!jsonString || !jsonString.trim()) return [];
+  try {
+    const data = JSON.parse(jsonString);
+    let rawCategories: any[] = [];
+
+    if (Array.isArray(data)) {
+      rawCategories = data;
+    } else if (data && typeof data === "object") {
+      if (Array.isArray(data.categories)) rawCategories = data.categories;
+      else if (Array.isArray(data.categorias)) rawCategories = data.categorias;
+    }
+
+    return rawCategories.map((c: any, idx: number) => ({
+      id: c.id || c.slug || `cat-${Date.now()}-${idx}`,
+      name: c.name || c.nome || "Categoria",
+      slug: c.slug || (c.name ? c.name.toLowerCase().replace(/[^a-z0-9]/g, "-") : `cat-${idx}`),
+      icon: c.icon || c.icone || "🌸",
+      description: c.description || c.descricao || "",
+      active: c.active !== false,
+    }));
+  } catch (err) {
+    console.error("Erro ao analisar JSON de categorias:", err);
+    throw new Error("Formato do arquivo JSON de categorias inválido.");
+  }
+}
+
+/**
+ * Downloads a formatted JSON file directly in the browser
+ */
+export function downloadJSON(filename: string, content: string | object) {
+  const text = typeof content === "string" ? content : JSON.stringify(content, null, 2);
+  const blob = new Blob([text], { type: "application/json;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+/**
+ * Single-click helper to download pedidos.json
+ */
+export function downloadOrdersJSON(orders: KanbanOrder[]) {
+  const json = exportOrdersToJSON(orders);
+  downloadJSON(`pedidos.json`, json);
+}
+
+/**
+ * Single-click helper to download catalogo.json
+ */
+export function downloadCatalogJSON(products: Product[], categories: Category[]) {
+  const json = exportCatalogToJSON(products, categories);
+  downloadJSON(`catalogo.json`, json);
+}
+
+/**
+ * Single-click helper to download categorias.json
+ */
+export function downloadCategoriesJSON(categories: Category[]) {
+  const json = exportCategoriesToJSON(categories);
+  downloadJSON(`categorias.json`, json);
 }
 
 /**
@@ -541,582 +767,71 @@ export function mergeOrders(
 }
 
 /**
- * Helper to parse CSV line respecting quotes
- */
-function parseCSVLine(text: string, delim: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const char = text[i];
-    if (char === '"') {
-      if (inQuotes && text[i + 1] === '"') {
-        current += '"';
-        i++;
-      } else {
-        inQuotes = !inQuotes;
-      }
-    } else if (char === delim && !inQuotes) {
-      result.push(current.trim().replace(/^"|"$/g, ""));
-      current = "";
-    } else {
-      current += char;
-    }
-  }
-  result.push(current.trim().replace(/^"|"$/g, ""));
-  return result;
-}
-
-/**
- * Parses raw CSV string (from Google Sheets export or uploaded CSV file) into KanbanOrder array
- */
-export function parseOrdersFromCSV(csvContent: string): KanbanOrder[] {
-  if (!csvContent || !csvContent.trim()) return [];
-
-  const lines = csvContent
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-
-  if (lines.length <= 1) return [];
-
-  // Auto-detect delimiter
-  const firstLine = lines[0];
-  const countCommas = (firstLine.match(/,/g) || []).length;
-  const countSemicolons = (firstLine.match(/;/g) || []).length;
-  const countTabs = (firstLine.match(/\t/g) || []).length;
-
-  let delimiter = ",";
-  if (countSemicolons > countCommas && countSemicolons > countTabs) {
-    delimiter = ";";
-  } else if (countTabs > countCommas && countTabs > countSemicolons) {
-    delimiter = "\t";
-  }
-
-  const normalizeHeader = (h: string) =>
-    h
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .trim();
-
-  const headers = parseCSVLine(lines[0], delimiter).map(normalizeHeader);
-
-  const findCol = (keywords: string[]): number => {
-    const normKeywords = keywords.map((k) =>
-      k
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-    );
-    for (const kw of normKeywords) {
-      const idx = headers.findIndex((h) => h.includes(kw));
-      if (idx !== -1) return idx;
-    }
-    return -1;
-  };
-
-  const idxOrderNum = findCol(["numero", "pedido", "codigo", "n.", "nº"]);
-  const idxDate = findCol(["data criacao", "data e hora", "data cadastro", "timestamp", "carimbo", "data"]);
-  const idxCustomer = findCol(["cliente", "remetente", "nome", "comprador"]);
-  const idxPhone = findCol(["whatsapp", "telefone", "celular", "contato"]);
-  const idxBirth = findCol(["aniversario", "nascimento"]);
-  const idxProduct = findCol(["produto", "arranjo", "item", "escolhido"]);
-  const idxCategory = findCol(["categoria"]);
-  const idxRefPrice = findCol(["referencia", "preco referencia", "valor do produto", "preco do produto", "valor referencia"]);
-  const idxFreight = findCol(["custo de frete", "taxa de frete", "frete", "entrega"]);
-  const idxTotal = findCol(["valor total", "total estimado", "total"]);
-  const idxAddress = findCol(["endereco", "rua", "local"]);
-  const idxNeighborhood = findCol(["bairro"]);
-  const idxCity = findCol(["cidade", "municipio"]);
-  const idxDeliveryDate = findCol(["data de entrega", "horario", "previsao", "turno"]);
-  const idxCard = findCol(["mensagem", "cartao", "dedicatoria"]);
-  const idxPayment = findCol(["forma pagamento", "pagamento", "meio"]);
-  const idxStatus = findCol(["status", "situacao", "etapa"]);
-
-  const orders: KanbanOrder[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const cols = parseCSVLine(lines[i], delimiter);
-    if (cols.length === 0 || cols.every((c) => !c)) continue;
-
-    const orderNum = (idxOrderNum !== -1 && cols[idxOrderNum]) || `#PAP-${1000 + i}`;
-    const rawDate = idxDate !== -1 && cols[idxDate] ? cols[idxDate] : "";
-    const createdAt = normalizeDate(rawDate);
-
-    const customerName = (idxCustomer !== -1 && cols[idxCustomer]) || "Cliente";
-    const phone = (idxPhone !== -1 && cols[idxPhone]) || "";
-    const birth = (idxBirth !== -1 && cols[idxBirth]) || "";
-    const product = (idxProduct !== -1 && cols[idxProduct]) || "Arranjo de Flores";
-    const category = (idxCategory !== -1 && cols[idxCategory]) || "Arranjos";
-
-    const parseNum = (val: string): number => {
-      if (!val) return 0;
-      const clean = val.replace(/R\$/gi, "").replace(/\s/g, "").replace(",", ".");
-      const n = parseFloat(clean);
-      return isNaN(n) ? 0 : n;
-    };
-
-    const refPrice = idxRefPrice !== -1 ? parseNum(cols[idxRefPrice]) : 0;
-    const freightFee = idxFreight !== -1 ? parseNum(cols[idxFreight]) : 0;
-    let totalPrice = idxTotal !== -1 ? parseNum(cols[idxTotal]) : 0;
-    if (totalPrice === 0) totalPrice = refPrice + freightFee;
-
-    const address = (idxAddress !== -1 && cols[idxAddress]) || "";
-    const neighborhood = (idxNeighborhood !== -1 && cols[idxNeighborhood]) || "";
-    const city = (idxCity !== -1 && cols[idxCity]) || "Pirapora";
-    const deliveryDate = (idxDeliveryDate !== -1 && cols[idxDeliveryDate]) || "";
-    const cardMsg = (idxCard !== -1 && cols[idxCard]) || "";
-    const paymentRaw = (idxPayment !== -1 && cols[idxPayment] ? cols[idxPayment].toLowerCase() : "");
-    let paymentMethod: "pix" | "cartao" | "dinheiro" = "pix";
-    if (paymentRaw.includes("cart") || paymentRaw.includes("cred") || paymentRaw.includes("deb")) {
-      paymentMethod = "cartao";
-    } else if (paymentRaw.includes("dinh") || paymentRaw.includes("esp")) {
-      paymentMethod = "dinheiro";
-    }
-    const statusRaw = (idxStatus !== -1 && cols[idxStatus] ? cols[idxStatus].toLowerCase() : "pedido");
-
-    let status: KanbanOrder["status"] = "pedido";
-    if (statusRaw.includes("conf") || statusRaw.includes("pago") || statusRaw.includes("prod") || statusRaw.includes("bancada")) {
-      status = "confirmado";
-    } else if (statusRaw.includes("rota") || statusRaw.includes("saiu") || statusRaw.includes("andamento")) {
-      status = "em_andamento";
-    } else if (statusRaw.includes("conc") || statusRaw.includes("entr") || statusRaw.includes("final")) {
-      status = "concluido";
-    }
-
-    orders.push({
-      id: `csv-${Date.now()}-${i}-${orderNum.replace(/[^a-zA-Z0-9]/g, "")}`,
-      orderNumber: orderNum,
-      createdAt,
-      customerName,
-      customerPhone: phone,
-      customerBirthDate: birth,
-      productName: product,
-      category,
-      referencePrice: refPrice,
-      freightFee,
-      totalPrice,
-      deliveryAddress: address,
-      deliveryNeighborhood: neighborhood,
-      deliveryCity: city,
-      deliveryDate,
-      cardMessage: cardMsg,
-      paymentMethod,
-      status,
-    });
-  }
-
-  return orders;
-}
-
-/**
- * Generates ready-to-copy Google Sheets CSV for Orders (Pedidos)
+ * Helper to export legacy CSV (optional fallback)
  */
 export function exportOrdersToCSV(orders: KanbanOrder[]): string {
   const headers = [
-    "Numero Pedido",
-    "Data Criacao",
-    "Cliente",
-    "WhatsApp",
-    "Aniversario Cliente",
-    "Produto / Arranjo",
-    "Categoria",
-    "Preco Referencia Item (R$)",
-    "Custo de Frete (R$)",
-    "Valor Total Estimado (R$)",
-    "Endereco de Entrega",
-    "Cidade",
-    "Data de Entrega",
-    "Mensagem do Cartao",
-    "Forma Pagamento",
-    "Status Kanban",
-    "Foto Conclusao"
+    "Numero Pedido", "Data Criacao", "Cliente", "Telefone Cliente", "Aniversario Cliente",
+    "Produto", "Categoria", "Preco Referencia", "Taxa de Frete", "Total",
+    "Cidade", "Endereco", "Data Entrega", "Mensagem Cartao", "Forma Pagamento", "Status", "Foto Conclusao"
   ];
+  const rows = orders.map((o) => [
+    o.orderNumber, o.createdAt, o.customerName, o.customerPhone, o.customerBirthDate || "",
+    o.productName, o.category, o.referencePrice || "", o.freightFee || "", o.totalPrice,
+    o.deliveryCity, o.deliveryAddress, o.deliveryDate, o.cardMessage, o.paymentMethod, o.status, o.photoProofUrl || ""
+  ].map((val) => `"${String(val ?? "").replace(/"/g, '""')}"`).join(","));
 
-  const rows = orders.map((o) => {
-    const freight = o.freightFee !== undefined ? o.freightFee : (o.deliveryCity?.includes("Buritizeiro") ? 15.0 : 10.0);
-    const refPrice = o.referencePrice !== undefined ? o.referencePrice : Math.max(0, (o.totalPrice || 0) - freight);
-    const total = o.totalPrice !== undefined ? o.totalPrice : (refPrice + freight);
-
-    return [
-      `"${o.orderNumber}"`,
-      `"${o.createdAt ? new Date(o.createdAt).toLocaleString("pt-BR") : ""}"`,
-      `"${o.customerName || ""}"`,
-      `"${o.customerPhone || ""}"`,
-      `"${o.customerBirthDate || ""}"`,
-      `"${o.productName || ""}"`,
-      `"${o.category || ""}"`,
-      `"${refPrice.toFixed(2)}"`,
-      `"${freight.toFixed(2)}"`,
-      `"${total.toFixed(2)}"`,
-      `"${o.deliveryAddress || ""}"`,
-      `"${o.deliveryCity || ""}"`,
-      `"${o.deliveryDate || ""}"`,
-      `"${(o.cardMessage || "").replace(/"/g, '""')}"`,
-      `"${o.paymentMethod || "pix"}"`,
-      `"${o.status}"`,
-      `"${o.photoProofUrl || ""}"`
-    ];
-  });
-
-  return [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+  return [headers.join(","), ...rows].join("\n");
 }
 
-/**
- * Generates ready-to-copy Google Sheets CSV for Catalog (Catálogo de Produtos)
- */
-export function exportCatalogToCSV(products: Product[]): string {
-  const headers = [
-    "ID / Codigo",
-    "Nome do Produto",
-    "Slug",
-    "Categoria",
-    "Preco Venda (R$)",
-    "Preco Referencia (R$)",
-    "Preco Original (R$)",
-    "Sob Consulta",
-    "Ocasioes",
-    "Tipos de Flor",
-    "URL da Imagem",
-    "Descricao",
-    "Itens Inclusos",
-    "Instrucoes de Cuidado",
-    "Tags",
-    "Avaliacao",
-    "Total Avaliacoes",
-    "Em Estoque",
-    "Total Pedidos"
-  ];
-
-  const rows = products.map((p) => {
-    return [
-      `"${p.id || ""}"`,
-      `"${(p.name || "").replace(/"/g, '""')}"`,
-      `"${p.slug || ""}"`,
-      `"${(p.category || "").replace(/"/g, '""')}"`,
-      `"${p.price !== undefined ? p.price.toFixed(2) : ""}"`,
-      `"${p.referencePrice !== undefined ? p.referencePrice.toFixed(2) : ""}"`,
-      `"${p.originalPrice !== undefined ? p.originalPrice.toFixed(2) : ""}"`,
-      `"${p.isPriceOnDemand ? "Sim" : "Nao"}"`,
-      `"${(p.occasion || []).join(", ")}"`,
-      `"${(p.flowerType || []).join(", ")}"`,
-      `"${p.imageUrl || ""}"`,
-      `"${(p.description || "").replace(/"/g, '""')}"`,
-      `"${(p.details?.itemsIncluded || []).join("; ").replace(/"/g, '""')}"`,
-      `"${(p.details?.careInstructions || "").replace(/"/g, '""')}"`,
-      `"${(p.tags || []).join(", ")}"`,
-      `"${p.rating || 5}"`,
-      `"${p.reviewCount || 0}"`,
-      `"${p.inStock !== false ? "Sim" : "Nao"}"`,
-      `"${p.orderCount || 0}"`
-    ];
-  });
-
-  return [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+export function parseCatalogFromCSV(text: string): { products: Product[]; categories: Category[] } {
+  return parseCatalogFromJSON(text);
 }
 
-/**
- * Parses raw CSV into Product array
- */
-export function parseCatalogFromCSV(csvContent: string): Product[] {
-  if (!csvContent || !csvContent.trim()) return [];
-
-  const lines = csvContent
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-
-  if (lines.length <= 1) return [];
-
-  const firstLine = lines[0];
-  const countCommas = (firstLine.match(/,/g) || []).length;
-  const countSemicolons = (firstLine.match(/;/g) || []).length;
-  const delimiter = countSemicolons > countCommas ? ";" : ",";
-
-  const normalizeHeader = (h: string) =>
-    h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-
-  const headers = parseCSVLine(lines[0], delimiter).map(normalizeHeader);
-
-  const findCol = (keywords: string[]): number => {
-    const normKeywords = keywords.map((k) =>
-      k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    );
-    for (const kw of normKeywords) {
-      const idx = headers.findIndex((h) => h.includes(kw));
-      if (idx !== -1) return idx;
-    }
-    return -1;
-  };
-
-  const idxId = findCol(["id", "codigo"]);
-  const idxName = findCol(["nome", "produto", "titulo", "arranjo"]);
-  const idxSlug = findCol(["slug"]);
-  const idxCategory = findCol(["categoria"]);
-  const idxPrice = findCol(["preco venda", "preco", "valor"]);
-  const idxRefPrice = findCol(["referencia", "preco referencia"]);
-  const idxOrigPrice = findCol(["original", "de"]);
-  const idxOnDemand = findCol(["consulta", "sob consulta", "demanda"]);
-  const idxOccasion = findCol(["ocasiao", "ocasioes"]);
-  const idxFlowerType = findCol(["tipo flor", "flores", "tipo de flor"]);
-  const idxImage = findCol(["imagem", "foto", "url", "image"]);
-  const idxDesc = findCol(["descricao", "detalhe"]);
-  const idxItems = findCol(["itens inclusos", "incluso", "itens"]);
-  const idxCare = findCol(["cuidado", "instrucoes"]);
-  const idxTags = findCol(["tag", "etiqueta"]);
-  const idxStock = findCol(["estoque", "disponivel"]);
-  const idxOrders = findCol(["pedidos", "total pedidos", "vendas"]);
-
-  const products: Product[] = [];
-
-  const parseNum = (val: string): number | undefined => {
-    if (!val || !val.trim()) return undefined;
-    const clean = val.replace(/R\$/gi, "").replace(/\s/g, "").replace(",", ".");
-    const n = parseFloat(clean);
-    return isNaN(n) ? undefined : n;
-  };
-
-  for (let i = 1; i < lines.length; i++) {
-    const cols = parseCSVLine(lines[i], delimiter);
-    if (cols.length === 0 || cols.every((c) => !c)) continue;
-
-    const name = (idxName !== -1 && cols[idxName]) || `Arranjo #${i}`;
-    const id = (idxId !== -1 && cols[idxId]) || `prod-${Date.now()}-${i}`;
-    const slug = (idxSlug !== -1 && cols[idxSlug]) || name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-    const category = (idxCategory !== -1 && cols[idxCategory]) || "buques-de-rosas";
-
-    const price = idxPrice !== -1 ? parseNum(cols[idxPrice]) : undefined;
-    const referencePrice = idxRefPrice !== -1 ? parseNum(cols[idxRefPrice]) : undefined;
-    const originalPrice = idxOrigPrice !== -1 ? parseNum(cols[idxOrigPrice]) : undefined;
-    const isPriceOnDemand = idxOnDemand !== -1 ? (cols[idxOnDemand].toLowerCase().includes("sim") || cols[idxOnDemand].toLowerCase().includes("true")) : (price === undefined);
-
-    const occasion = idxOccasion !== -1 && cols[idxOccasion] ? cols[idxOccasion].split(",").map((s) => s.trim()) : ["romance", "aniversario"];
-    const flowerType = idxFlowerType !== -1 && cols[idxFlowerType] ? cols[idxFlowerType].split(",").map((s) => s.trim()) : ["rosas"];
-    const imageUrl = (idxImage !== -1 && cols[idxImage]) || "https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=800&q=80";
-    const description = (idxDesc !== -1 && cols[idxDesc]) || "";
-    const itemsIncluded = idxItems !== -1 && cols[idxItems] ? cols[idxItems].split(";").map((s) => s.trim()) : [];
-    const careInstructions = (idxCare !== -1 && cols[idxCare]) || "Manter em local fresco com água limpa trocada a cada dois dias.";
-    const tags = idxTags !== -1 && cols[idxTags] ? cols[idxTags].split(",").map((s) => s.trim()) : ["Entrega Hoje"];
-    const inStock = idxStock !== -1 ? !cols[idxStock].toLowerCase().includes("nao") : true;
-    const orderCount = idxOrders !== -1 ? (parseNum(cols[idxOrders]) || 10) : 10;
-
-    products.push({
-      id,
-      name,
-      slug,
-      category,
-      price,
-      referencePrice,
-      originalPrice,
-      isPriceOnDemand,
-      occasion,
-      flowerType,
-      imageUrl,
-      description,
-      details: {
-        itemsIncluded,
-        careInstructions,
-      },
-      tags,
-      rating: 5,
-      reviewCount: orderCount,
-      inStock,
-      orderCount,
-    });
-  }
-
-  return products;
+export function parseCategoriesFromCSV(text: string): Category[] {
+  return parseCategoriesFromJSON(text);
 }
 
-/**
- * Generates ready-to-copy Google Sheets CSV for Categories (Categorias)
- */
-export function exportCategoriesToCSV(categories: Category[]): string {
-  const headers = [
-    "ID / Slug",
-    "Nome da Categoria",
-    "Icone / Emoji",
-    "Descricao",
-    "Ativo"
-  ];
-
-  const rows = categories.map((c) => {
-    return [
-      `"${c.id || c.slug}"`,
-      `"${(c.name || "").replace(/"/g, '""')}"`,
-      `"${c.icon || "🌸"}"`,
-      `"${(c.description || "").replace(/"/g, '""')}"`,
-      `"${c.active !== false ? "Sim" : "Nao"}"`
-    ];
-  });
-
-  return [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+export function parseOrdersFromCSV(text: string): KanbanOrder[] {
+  return parseOrdersFromJSON(text);
 }
 
-/**
- * Parses raw CSV into Category array
- */
-export function parseCategoriesFromCSV(csvContent: string): Category[] {
-  if (!csvContent || !csvContent.trim()) return [];
-
-  const lines = csvContent
-    .split(/\r?\n/)
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-
-  if (lines.length <= 1) return [];
-
-  const firstLine = lines[0];
-  const delimiter = firstLine.includes(";") ? ";" : ",";
-
-  const normalizeHeader = (h: string) =>
-    h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim();
-
-  const headers = parseCSVLine(lines[0], delimiter).map(normalizeHeader);
-
-  const findCol = (keywords: string[]): number => {
-    const normKeywords = keywords.map((k) =>
-      k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
-    );
-    for (const kw of normKeywords) {
-      const idx = headers.findIndex((h) => h.includes(kw));
-      if (idx !== -1) return idx;
-    }
-    return -1;
-  };
-
-  const idxId = findCol(["id", "slug", "codigo"]);
-  const idxName = findCol(["nome", "categoria", "titulo"]);
-  const idxIcon = findCol(["icone", "emoji", "icon"]);
-  const idxDesc = findCol(["descricao", "detalhes"]);
-  const idxActive = findCol(["ativo", "status", "visivel"]);
-
-  const categories: Category[] = [];
-
-  for (let i = 1; i < lines.length; i++) {
-    const cols = parseCSVLine(lines[i], delimiter);
-    if (cols.length === 0 || cols.every((c) => !c)) continue;
-
-    const name = (idxName !== -1 && cols[idxName]) || `Categoria ${i}`;
-    const slug = (idxId !== -1 && cols[idxId]) || name.toLowerCase().replace(/[^a-z0-9]/g, "-");
-    const icon = (idxIcon !== -1 && cols[idxIcon]) || "🌸";
-    const description = (idxDesc !== -1 && cols[idxDesc]) || "";
-    const active = idxActive !== -1 ? !cols[idxActive].toLowerCase().includes("nao") : true;
-
-    categories.push({
-      id: slug,
-      slug,
-      name,
-      icon,
-      description,
-      active,
-    });
-  }
-
-  return categories;
+export function fetchOrdersFromGoogleSheets(webhookUrl: string, sheetId?: string, folderUrl?: string) {
+  return fetchStoreDataFromGoogleDrive(webhookUrl, folderUrl, sheetId);
 }
 
-/**
- * Generates ready-to-copy Google Sheets CSV for Customers (with Birthdays for VIP promos)
- */
-export function exportCustomersToCSV(customers: Customer[]): string {
-  const headers = [
-    "Nome Completo",
-    "WhatsApp / Telefone",
-    "Data de Aniversario",
-    "Data Cadastro",
-    "Total Pedidos",
-    "Observacoes / Mimos"
-  ];
-
-  const rows = customers.map((c) => [
-    `"${c.fullName}"`,
-    `"${c.phone}"`,
-    `"${c.birthDate || ""}"`,
-    `"${c.createdAt ? new Date(c.createdAt).toLocaleDateString("pt-BR") : ""}"`,
-    `"${c.totalOrders || 0}"`,
-    `"${(c.notes || "").replace(/"/g, '""')}"`
-  ]);
-
-  return [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
-}
-
-/**
- * Generates official multi-section Google Sheets template for Floricultura Papoula
- * containing Orders, Catalog and Categories headers and sample data
- */
 export function downloadOfficialSpreadsheetTemplate() {
-  const content = [
-    `# ==========================================`,
-    `# ABA 1: PEDIDOS (Copie e cole na aba 'Pedidos')`,
-    `# ==========================================`,
-    exportOrdersToCSV([
-      {
-        id: "sample-1",
-        orderNumber: "#PAP-1001",
-        customerName: "Carlos Eduardo",
-        customerPhone: "(38) 99999-0000",
-        customerBirthDate: "15/05/1990",
-        productName: "Buquê 12 Rosas Vermelhas Luxo",
-        category: "Buquês de Rosas",
-        referencePrice: 180.0,
-        freightFee: 10.0,
-        totalPrice: 190.0,
-        deliveryAddress: "Rua Montes Claros, 240",
-        deliveryNeighborhood: "Centro",
-        deliveryCity: "Pirapora",
-        deliveryDate: "Hoje - Imediato",
-        cardMessage: "Com todo meu amor e carinho! Feliz aniversário!",
-        paymentMethod: "pix",
-        status: "confirmado",
-        createdAt: new Date().toISOString(),
-      },
-    ]),
-    `\n\n# ==========================================`,
-    `# ABA 2: CATALOGO (Copie e cole na aba 'Catalogo')`,
-    `# ==========================================`,
-    exportCatalogToCSV([
-      {
-        id: "buque-12-rosas",
-        name: "Buquê 12 Rosas Vermelhas Luxo",
-        slug: "buque-12-rosas",
-        category: "buques-de-rosas",
-        price: 180.0,
-        referencePrice: 180.0,
-        isPriceOnDemand: false,
-        occasion: ["romance", "aniversario"],
-        flowerType: ["rosas"],
-        imageUrl: "https://images.unsplash.com/photo-1561181286-d3fee7d55364?auto=format&fit=crop&w=800&q=80",
-        description: "Arranjo exuberante com 12 botões selecionados de rosas vermelhas nobres e folhagens de eucalipto.",
-        details: {
-          itemsIncluded: ["12 Rosas Vermelhas", "Folhagens de Eucalipto", "Laço de Cetim", "Embalagem Nobre"],
-          careInstructions: "Troque a água do vaso em dias alternados.",
-        },
-        tags: ["Mais Vendido", "Entrega Hoje"],
-        rating: 5,
-        reviewCount: 48,
-        inStock: true,
-        orderCount: 48,
-      },
-    ]),
-    `\n\n# ==========================================`,
-    `# ABA 3: CATEGORIAS (Copie e cole na aba 'Categorias')`,
-    `# ==========================================`,
-    exportCategoriesToCSV([
-      { id: "buques-de-rosas", slug: "buques-de-rosas", name: "Buquês de Rosas", icon: "🌹", description: "Buquês artesanais de rosas vermelhas e nobres.", active: true },
-      { id: "girassois", slug: "girassois", name: "Girassóis & Combinações", icon: "🌻", description: "Buquês luminosos de girassóis.", active: true },
-      { id: "flores-do-campo", slug: "flores-do-campo", name: "Gérberas & Flores do Campo", icon: "💐", description: "Composições florais exuberantes.", active: true },
-    ]),
-  ].join("\n");
-
-  downloadCSV("Planilha_Completa_Floricultura_Papoula.csv", content);
+  downloadCatalogJSON([], []);
 }
 
-/**
- * Triggers file download in browser
- */
+export function exportCatalogToCSV(products: Product[]): string {
+  const headers = ["ID", "Nome", "Slug", "Categoria", "Preco", "Preco Referencia", "Preco Original", "Sob Consulta", "Imagem", "Descricao"];
+  const rows = products.map((p) => [
+    p.id, p.name, p.slug, p.category, p.price ?? "", p.referencePrice ?? "", p.originalPrice ?? "",
+    p.isPriceOnDemand ? "Sim" : "Nao", p.imageUrl, p.description
+  ].map((val) => `"${String(val ?? "").replace(/"/g, '""')}"`).join(","));
+
+  return [headers.join(","), ...rows].join("\n");
+}
+
+export function exportCategoriesToCSV(categories: Category[]): string {
+  const headers = ["ID", "Nome", "Icone", "Descricao", "Ativo"];
+  const rows = categories.map((c) => [
+    c.id, c.name, c.icon, c.description, c.active ? "Sim" : "Nao"
+  ].map((val) => `"${String(val ?? "").replace(/"/g, '""')}"`).join(","));
+
+  return [headers.join(","), ...rows].join("\n");
+}
+
+export function exportCustomersToCSV(customers: Customer[]): string {
+  const headers = ["Nome", "Telefone", "Aniversario", "Data Cadastro", "Total Pedidos", "Notas"];
+  const rows = customers.map((c) => [
+    c.fullName, c.phone, c.birthDate || "", c.createdAt, c.totalOrders, c.notes || ""
+  ].map((val) => `"${String(val ?? "").replace(/"/g, '""')}"`).join(","));
+
+  return [headers.join(","), ...rows].join("\n");
+}
+
 export function downloadCSV(filename: string, content: string) {
   const blob = new Blob(["\uFEFF" + content], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -1130,201 +845,170 @@ export function downloadCSV(filename: string, content: string) {
 }
 
 /**
- * Complete Google Apps Script Master Code for multi-tab support with automatic tab and column creation
- */
-export const GOOGLE_APPS_SCRIPT_MASTER_CODE = `/**
  * =========================================================================
- * FLORICULTURA PAPOULA - GOOGLE APPS SCRIPT WEB APP MULTI-ABAS
- * Integracao Oficial: Produtos, Categorias, Pedidos e Clientes
+ * GOOGLE APPS SCRIPT OFICIAL (GOOGLE DRIVE ARQUIVOS JSON)
+ * Código pronto para colar no Google Apps Script vinculado à pasta do Drive.
+ * =========================================================================
+ */
+export const GOOGLE_APPS_SCRIPT_DRIVE_JSON_CODE = `/**
+ * =========================================================================
+ * FLORICULTURA PAPOULA - BANCO DE DADOS EM ARQUIVOS JSON NO GOOGLE DRIVE
+ * Armazena e lê diretamente os arquivos na pasta compartilhada:
+ * - pedidos.json
+ * - catalogo.json
+ * - categorias.json
  * =========================================================================
  * 
- * INSTRUCOES:
- * 1. Na sua Planilha Google, acesse no menu superior: Extensoes > Apps Script.
- * 2. Selecione TUDO no editor (Ctrl+A) e APAGUE (Delete).
- * 3. Cole este codigo completo e clique em Salvar (Ctrl+S).
- * 4. Para testar: selecione a funcao 'testarIntegracao' e clique em Executar.
- * 5. Clique em Implantar > Gerenciar implantacoes (ou Nova implantacao).
- * 6. Clique no lapis (Editar) > Versao: Nova versao.
- * 7. Quem pode acessar: Qualquer pessoa (Anyone) - IMPORTANTE!
- * 8. Clique em Implantar e copie a URL /exec.
+ * INSTRUÇÕES RÁPIDAS DE IMPLANTAÇÃO (2 MINUTOS):
+ * 1. Acesse https://script.google.com e clique em "Novo Projeto".
+ * 2. Apague todo o código existente (Ctrl+A e Delete).
+ * 3. Cole este código completo.
+ * 4. (Opcional) Cole o ID da sua pasta do Google Drive na variável FOLDER_ID abaixo.
+ *    Se deixar em branco, o script cria automaticamente a pasta "Floricultura Papoula - Dados" no seu Drive!
+ * 5. Clique em "Salvar" (ícone de disquete ou Ctrl+S).
+ * 6. Para testar: selecione a função 'testarIntegracaoDriveJSON' e clique em Executar.
+ * 7. Clique em "Implantar" > "Nova implantação" (ícone azul no topo).
+ * 8. Tipo: "Aplicativo da Web".
+ * 9. Executar como: "Eu" (seu e-mail).
+ * 10. Quem pode acessar: "Qualquer pessoa" (IMPORTANTE!).
+ * 11. Clique em "Implantar" e copie a URL gerada (/exec) para colar no Painel Administrativo.
  */
 
-// Funcao de teste simples e seguro
-function testarIntegracao() {
-  var ss = getSpreadsheet();
-  if (!ss) {
-    Logger.log("Erro: Nenhuma planilha vinculada.");
-    return "Erro: Nenhuma planilha vinculada";
-  }
-  
-  Logger.log("Configurando abas...");
-  setupAllTabs(ss);
-  
-  Logger.log("Lendo dados...");
-  var res = doGet({ parameter: {} });
-  var jsonStr = res.getContent();
-  var parsed = JSON.parse(jsonStr);
-  
-  var totalPedidos = parsed.orders ? parsed.orders.length : 0;
-  var totalProdutos = parsed.products ? parsed.products.length : 0;
-  var totalCategorias = parsed.categories ? parsed.categories.length : 0;
-  
-  Logger.log("Total Pedidos: " + totalPedidos);
-  Logger.log("Total Produtos: " + totalProdutos);
-  Logger.log("Total Categorias: " + totalCategorias);
-  
-  try {
-    SpreadsheetApp.getUi().alert(
-      "TESTE REALIZADO COM SUCESSO!\n\n" +
-      "- Pedidos encontrados: " + totalPedidos + "\n" +
-      "- Produtos no catalogo: " + totalProdutos + "\n" +
-      "- Categorias: " + totalCategorias + "\n\n" +
-      "Planilha configurada e pronta!"
-    );
-  } catch (e) {}
-  
-  return jsonStr;
-}
+// Se tiver o ID de uma pasta específica no Google Drive, cole aqui (ex: "1aBcDeFg_hIjKlMnOpQrStUvWxYz").
+// Se deixar vazio, o script cria/encontra a pasta "Floricultura Papoula - Dados" automaticamente!
+var FOLDER_ID = "";
+var FOLDER_NAME = "Floricultura Papoula - Dados";
 
-// Configuracao das colunas e abas
-var SHEET_CONFIG = {
-  produtos: {
-    name: "Produtos",
-    aliases: ["Produtos", "Catalogo", "Catálogo"],
-    headers: [
-      "ID / Codigo", "Nome do Produto", "Slug", "Categoria", "Preco Venda (R$)",
-      "Preco Referencia (R$)", "Preco Original (R$)", "Sob Consulta", "Ocasioes",
-      "Tipos de Flor", "URL da Imagem", "Descricao", "Itens Inclusos",
-      "Instrucoes de Cuidado", "Tags", "Avaliacao", "Total Avaliacoes", "Em Estoque", "Total Pedidos"
-    ]
-  },
-  categorias: {
-    name: "Categorias",
-    aliases: ["Categorias", "Categoria"],
-    headers: [
-      "ID / Slug", "Nome da Categoria", "Icone / Emoji", "Descricao", "Ativo"
-    ]
-  },
-  pedidos: {
-    name: "Pedidos",
-    aliases: [
-      "Pedidos",
-      "Planilha_Pedidos_Floricultura_Papoula",
-      "Planilha_Pedidos",
-      "Vendas",
-      "Página1",
-      "Página 1",
-      "Sheet1"
-    ],
-    headers: [
-      "Numero Pedido", "Data Criacao", "Cliente / Remetente", "WhatsApp Cliente",
-      "Aniversario Cliente", "Produto / Arranjo", "Categoria", "Preco Referencia Item (R$)",
-      "Custo de Frete (R$)", "Valor Total Estimado (R$)", "Destinatario", "Telefone Destinatario",
-      "Cidade de Entrega", "Endereco Completo", "Bairro", "Ponto de Referencia",
-      "Data de Entrega", "Horario", "Mensagem do Cartao", "Forma Pagamento", "Status Kanban", "Foto Conclusao"
-    ]
-  },
-  clientes: {
-    name: "Clientes",
-    aliases: ["Clientes", "Contatos"],
-    headers: [
-      "Nome Completo", "WhatsApp / Telefone", "Data de Aniversario", "Data Cadastro", "Total Pedidos", "Observacoes / Mimos"
-    ]
-  }
-};
-
-function getSpreadsheet(ss) {
-  if (ss && typeof ss.getSheetByName === "function") return ss;
-  try {
-    var active = SpreadsheetApp.getActiveSpreadsheet();
-    if (active) return active;
-  } catch (e) {}
-  try {
-    var act = SpreadsheetApp.getActive();
-    if (act) return act;
-  } catch (e) {}
-  return null;
-}
-
-function getOrCreateSheetWithHeaders(ss, cfgKey) {
-  ss = getSpreadsheet(ss);
-  if (!ss) return null;
-
-  if (!cfgKey) cfgKey = "pedidos";
-  var cfg = SHEET_CONFIG[cfgKey];
-  if (!cfg) {
+/**
+ * Localiza ou cria a pasta do Google Drive
+ */
+function getStorageFolder() {
+  if (FOLDER_ID && FOLDER_ID.trim() !== "") {
     try {
-      return ss.getActiveSheet();
+      return DriveApp.getFolderById(FOLDER_ID.trim());
     } catch (e) {
-      return null;
+      Logger.log("Aviso: Nao foi possivel abrir pelo FOLDER_ID, buscando por nome...");
     }
   }
 
-  var sheet = null;
-  for (var a = 0; a < cfg.aliases.length; a++) {
-    sheet = ss.getSheetByName(cfg.aliases[a]);
-    if (sheet) break;
+  var folders = DriveApp.getFoldersByName(FOLDER_NAME);
+  if (folders.hasNext()) {
+    return folders.next();
   }
 
-  if (!sheet) {
+  // Cria a pasta automaticamente
+  var newFolder = DriveApp.createFolder(FOLDER_NAME);
+  Logger.log("Pasta criada no Google Drive: " + newFolder.getName() + " (ID: " + newFolder.getId() + ")");
+  return newFolder;
+}
+
+/**
+ * Lê o conteúdo de um arquivo JSON da pasta. Se não existir, retorna defaultData
+ */
+function readJSONFile(folder, filename, defaultData) {
+  var files = folder.getFilesByName(filename);
+  if (files.hasNext()) {
+    var file = files.next();
+    var content = file.getBlob().getDataAsString("UTF-8");
     try {
-      sheet = ss.insertSheet(cfg.name);
-    } catch (insErr) {
-      sheet = ss.getActiveSheet();
+      return JSON.parse(content);
+    } catch (e) {
+      Logger.log("Erro ao converter " + filename + " para JSON: " + e.toString());
+      return defaultData;
     }
   }
-
-  if (sheet && sheet.getLastRow() === 0) {
-    sheet.appendRow(cfg.headers);
-    formatHeaderRow(sheet, cfg.headers.length);
-  }
-
-  return sheet;
+  return defaultData;
 }
 
-function formatHeaderRow(sheet, numCols) {
-  if (!sheet) return;
+/**
+ * Salva ou atualiza um arquivo JSON na pasta do Google Drive
+ */
+function writeJSONFile(folder, filename, data) {
+  var content = typeof data === "string" ? data : JSON.stringify(data, null, 2);
+  var files = folder.getFilesByName(filename);
+  
+  if (files.hasNext()) {
+    var file = files.next();
+    file.setContent(content);
+    return file;
+  } else {
+    return folder.createFile(filename, content, MimeType.PLAIN_TEXT);
+  }
+}
+
+/**
+ * Função de teste para verificar a pasta e os arquivos JSON
+ */
+function testarIntegracaoDriveJSON() {
+  var folder = getStorageFolder();
+  Logger.log("Pasta ativa: " + folder.getName() + " (Link: " + folder.getUrl() + ")");
+
+  var orders = readJSONFile(folder, "pedidos.json", []);
+  var catalog = readJSONFile(folder, "catalogo.json", []);
+  var categories = readJSONFile(folder, "categorias.json", []);
+
+  // Se pedidos.json estiver vazio, inicializa com array
+  if (!orders || orders.length === 0) {
+    writeJSONFile(folder, "pedidos.json", []);
+  }
+
+  Logger.log("Total Pedidos no Drive: " + (Array.isArray(orders) ? orders.length : (orders.orders ? orders.orders.length : 0)));
+  Logger.log("Total Produtos no Drive: " + (Array.isArray(catalog) ? catalog.length : (catalog.products ? catalog.products.length : 0)));
+  Logger.log("Total Categorias no Drive: " + (Array.isArray(categories) ? categories.length : (categories.categories ? categories.categories.length : 0)));
+
+  return {
+    status: "OK",
+    folderName: folder.getName(),
+    folderUrl: folder.getUrl(),
+    folderId: folder.getId()
+  };
+}
+
+/**
+ * GET: Lê e retorna os arquivos JSON diretamente da pasta do Google Drive
+ */
+function doGet(e) {
   try {
-    var cols = numCols || sheet.getLastColumn() || 10;
-    var range = sheet.getRange(1, 1, 1, cols);
-    range.setFontWeight("bold");
-    range.setBackground("#114b30");
-    range.setFontColor("#ffffff");
-    range.setFontSize(10);
-    sheet.setFrozenRows(1);
-    for (var col = 1; col <= cols; col++) {
-      sheet.autoResizeColumn(col);
-    }
-  } catch (e) {}
+    var folder = getStorageFolder();
+    
+    var rawOrders = readJSONFile(folder, "pedidos.json", []);
+    var rawCatalog = readJSONFile(folder, "catalogo.json", []);
+    var rawCategories = readJSONFile(folder, "categorias.json", []);
+
+    var ordersList = Array.isArray(rawOrders) ? rawOrders : (rawOrders.orders || []);
+    var catalogList = Array.isArray(rawCatalog) ? rawCatalog : (rawCatalog.products || rawCatalog.catalog || []);
+    var categoriesList = Array.isArray(rawCategories) ? rawCategories : (rawCategories.categories || []);
+
+    var responsePayload = {
+      success: true,
+      folderName: folder.getName(),
+      folderUrl: folder.getUrl(),
+      folderId: folder.getId(),
+      orders: ordersList,
+      catalog: catalogList,
+      products: catalogList,
+      categories: categoriesList,
+      timestamp: new Date().toISOString()
+    };
+
+    return ContentService.createTextOutput(JSON.stringify(responsePayload))
+      .setMimeType(ContentService.MimeType.JSON);
+
+  } catch (err) {
+    return ContentService.createTextOutput(JSON.stringify({
+      success: false,
+      error: err.toString()
+    })).setMimeType(ContentService.MimeType.JSON);
+  }
 }
 
-function setupAllTabs(ss) {
-  ss = getSpreadsheet(ss);
-  if (!ss) return;
-  getOrCreateSheetWithHeaders(ss, "produtos");
-  getOrCreateSheetWithHeaders(ss, "categorias");
-  getOrCreateSheetWithHeaders(ss, "pedidos");
-  getOrCreateSheetWithHeaders(ss, "clientes");
-}
-
-function onOpen() {
-  var ui = SpreadsheetApp.getUi();
-  ui.createMenu("Floricultura Papoula")
-    .addItem("Configurar Todas as Abas", "manualSetup")
-    .addItem("Testar Integracao e Ler Pedidos", "testarIntegracao")
-    .addToUi();
-}
-
-function manualSetup() {
-  var ss = getSpreadsheet();
-  setupAllTabs(ss);
-  SpreadsheetApp.getUi().alert("Abas configuradas com sucesso!");
-}
-
+/**
+ * POST: Salva novos pedidos ou atualiza pedidos.json, catalogo.json e categorias.json
+ */
 function doPost(e) {
   var lock = LockService.getScriptLock();
   lock.tryLock(20000);
-  
+
   try {
     var contents = (e && e.postData) ? e.postData.contents : "";
     var data = {};
@@ -1336,169 +1020,102 @@ function doPost(e) {
       }
     }
 
-    var ss = getSpreadsheet();
-    if (!ss) {
-      return ContentService.createTextOutput(JSON.stringify({
-        success: false,
-        error: "Planilha nao vinculada."
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-    
-    setupAllTabs(ss);
+    var folder = getStorageFolder();
 
-    if (data.action === "getData" || data.action === "getOrders" || data.action === "list") {
+    // 1. Ação: Obter dados (getData)
+    if (data.action === "getData" || data.action === "getOrders") {
       return doGet(e);
     }
 
-    if (data.action === "syncAll" || data.initTabs === true) {
+    // 2. Ação: Salvar tudo de uma vez (syncAll / saveAll)
+    if (data.action === "syncAll" || data.action === "saveAll") {
+      if (data.orders && Array.isArray(data.orders)) {
+        writeJSONFile(folder, "pedidos.json", data.orders);
+      }
       if (data.products && Array.isArray(data.products)) {
-        var sProd = getOrCreateSheetWithHeaders(ss, "produtos");
-        sProd.clearContents();
-        sProd.appendRow(SHEET_CONFIG.produtos.headers);
-        formatHeaderRow(sProd, SHEET_CONFIG.produtos.headers.length);
-
-        for (var pa = 0; pa < data.products.length; pa++) {
-          var pr = data.products[pa];
-          sProd.appendRow([
-            pr.id || "",
-            pr.name || "",
-            pr.slug || "",
-            pr.category || "",
-            pr.price !== undefined && pr.price !== null ? pr.price : "",
-            pr.referencePrice !== undefined && pr.referencePrice !== null ? pr.referencePrice : "",
-            pr.originalPrice !== undefined && pr.originalPrice !== null ? pr.originalPrice : "",
-            pr.isPriceOnDemand ? "Sim" : "Nao",
-            Array.isArray(pr.occasion) ? pr.occasion.join(", ") : (pr.occasion || ""),
-            Array.isArray(pr.flowerType) ? pr.flowerType.join(", ") : (pr.flowerType || ""),
-            pr.imageUrl || "",
-            pr.description || "",
-            pr.details && pr.details.itemsIncluded ? pr.details.itemsIncluded.join("; ") : "",
-            pr.details && pr.details.careInstructions ? pr.details.careInstructions : "",
-            Array.isArray(pr.tags) ? pr.tags.join(", ") : (pr.tags || ""),
-            pr.rating || 5,
-            pr.reviewCount || 0,
-            pr.inStock !== false ? "Sim" : "Nao",
-            pr.orderCount || 0
-          ]);
-        }
+        writeJSONFile(folder, "catalogo.json", data.products);
       }
-
       if (data.categories && Array.isArray(data.categories)) {
-        var sCatg = getOrCreateSheetWithHeaders(ss, "categorias");
-        sCatg.clearContents();
-        sCatg.appendRow(SHEET_CONFIG.categorias.headers);
-        formatHeaderRow(sCatg, SHEET_CONFIG.categorias.headers.length);
-
-        for (var ca = 0; ca < data.categories.length; ca++) {
-          var ci = data.categories[ca];
-          sCatg.appendRow([
-            ci.id || ci.slug || "",
-            ci.name || "",
-            ci.icon || "Flor",
-            ci.description || "",
-            ci.active !== false ? "Sim" : "Nao"
-          ]);
-        }
-      }
-
-      if (data.orders && Array.isArray(data.orders) && data.orders.length > 0) {
-        var sPed = getOrCreateSheetWithHeaders(ss, "pedidos");
-        sPed.clearContents();
-        sPed.appendRow(SHEET_CONFIG.pedidos.headers);
-        formatHeaderRow(sPed, SHEET_CONFIG.pedidos.headers.length);
-
-        for (var oa = 0; oa < data.orders.length; oa++) {
-          var ord = data.orders[oa];
-          sPed.appendRow([
-            ord.orderNumber || ord.id || "",
-            ord.createdAt || new Date().toISOString(),
-            ord.customerName || "Cliente",
-            ord.customerPhone || "",
-            ord.customerBirthDate || "",
-            ord.productName || "Arranjo Floral",
-            ord.category || "Arranjos",
-            ord.referencePrice || ord.price || 0,
-            ord.freightFee || 0,
-            ord.totalPrice || 0,
-            ord.recipientName || ord.customerName || "",
-            ord.recipientPhone || "",
-            ord.deliveryCity || "Pirapora",
-            ord.deliveryAddress || "",
-            ord.deliveryNeighborhood || "",
-            ord.reference || "",
-            ord.deliveryDate || "",
-            ord.timeSlot || "",
-            ord.cardMessage || "",
-            ord.paymentMethod || "PIX",
-            ord.status || "pedido",
-            ord.photoProofUrl || ""
-          ]);
-        }
-      }
-
-      if (data.customers && Array.isArray(data.customers) && data.customers.length > 0) {
-        var sCust = getOrCreateSheetWithHeaders(ss, "clientes");
-        sCust.clearContents();
-        sCust.appendRow(SHEET_CONFIG.clientes.headers);
-        formatHeaderRow(sCust, SHEET_CONFIG.clientes.headers.length);
-
-        for (var cu = 0; cu < data.customers.length; cu++) {
-          var cus = data.customers[cu];
-          sCust.appendRow([
-            cus.fullName || "",
-            cus.phone || "",
-            cus.birthDate || "",
-            cus.createdAt || new Date().toLocaleDateString("pt-BR"),
-            cus.totalOrders || 0,
-            cus.notes || ""
-          ]);
-        }
+        writeJSONFile(folder, "categorias.json", data.categories);
       }
 
       return ContentService.createTextOutput(JSON.stringify({
         success: true,
-        message: "Sincronizacao completa realizada com sucesso!"
+        message: "Arquivos pedidos.json, catalogo.json e categorias.json salvos com sucesso na pasta do Google Drive!",
+        folderUrl: folder.getUrl()
       })).setMimeType(ContentService.MimeType.JSON);
     }
 
-    // Salvar novo pedido na aba "Pedidos"
-    var sheetPedDefault = getOrCreateSheetWithHeaders(ss, "pedidos");
-    var orderNum = data.orderNumber || ("#PAP-" + Math.floor(1000 + Math.random() * 9000));
-    var createdAt = data.createdAt || new Date().toISOString();
-    var customerName = data.senderName || data.customerName || "Cliente";
-    var customerPhone = data.senderPhone || data.customerPhone || "";
-    var customerBirthDate = data.customerBirthDate || data.senderBirthDate || "";
-    var productName = data.productName || "Arranjo de Flores";
-    var category = data.category || "Arranjos";
-    var refPrice = data.referencePrice || data.price || 0;
-    var freightFee = data.deliveryFee || data.freightFee || 0;
-    var totalPrice = data.total || data.totalPrice || (Number(refPrice) + Number(freightFee)) || 0;
-    var recipientName = data.recipientName || customerName;
-    var recipientPhone = data.recipientPhone || "";
-    var city = data.city || data.deliveryCity || "Pirapora";
-    var address = data.address || data.deliveryAddress || "";
-    var neighborhood = data.neighborhood || data.deliveryNeighborhood || "";
-    var reference = data.reference || "";
-    var deliveryDate = data.deliveryDate || "";
-    var timeSlot = data.timeSlot || "";
-    var cardMsg = data.cardMessage || "";
-    var payment = data.paymentMethod || "PIX";
-    var status = data.status || "pedido";
-    var photoProof = data.photoProofUrl || "";
-
-    if (sheetPedDefault) {
-      sheetPedDefault.appendRow([
-        orderNum, createdAt, customerName, customerPhone, customerBirthDate,
-        productName, category, refPrice, freightFee, totalPrice,
-        recipientName, recipientPhone, city, address, neighborhood, reference,
-        deliveryDate, timeSlot, cardMsg, payment, status, photoProof
-      ]);
+    // 3. Ação: Salvar apenas Pedidos
+    if (data.action === "saveOrders" && data.orders && Array.isArray(data.orders)) {
+      writeJSONFile(folder, "pedidos.json", data.orders);
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: "Arquivo pedidos.json atualizado (" + data.orders.length + " pedidos).",
+        folderUrl: folder.getUrl()
+      })).setMimeType(ContentService.MimeType.JSON);
     }
+
+    // 4. Ação: Salvar apenas Catálogo de Produtos
+    if ((data.action === "saveCatalog" || data.action === "saveProducts") && data.products && Array.isArray(data.products)) {
+      writeJSONFile(folder, "catalogo.json", data.products);
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: "Arquivo catalogo.json atualizado (" + data.products.length + " produtos).",
+        folderUrl: folder.getUrl()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 5. Ação: Salvar apenas Categorias
+    if (data.action === "saveCategories" && data.categories && Array.isArray(data.categories)) {
+      writeJSONFile(folder, "categorias.json", data.categories);
+      return ContentService.createTextOutput(JSON.stringify({
+        success: true,
+        message: "Arquivo categorias.json atualizado (" + data.categories.length + " categorias).",
+        folderUrl: folder.getUrl()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    // 6. Ação: Novo Pedido recebido (WhatsApp / Loja) -> Adiciona no pedidos.json
+    var rawOrders = readJSONFile(folder, "pedidos.json", []);
+    var existingOrders = Array.isArray(rawOrders) ? rawOrders : (rawOrders.orders || []);
+
+    var orderNum = data.orderNumber || ("#PAP-" + Math.floor(1000 + Math.random() * 9000));
+    var newOrderObj = {
+      id: "order-" + Date.now() + "-" + Math.floor(Math.random() * 1000),
+      orderNumber: orderNum,
+      createdAt: data.createdAt || new Date().toISOString(),
+      customerName: data.senderName || data.customerName || "Cliente",
+      customerPhone: data.senderPhone || data.customerPhone || "",
+      customerBirthDate: data.customerBirthDate || data.senderBirthDate || "",
+      productName: data.productName || "Arranjo Floral",
+      category: data.category || "Arranjos",
+      referencePrice: Number(data.referencePrice || data.price || 0),
+      freightFee: Number(data.deliveryFee || data.freightFee || 0),
+      totalPrice: Number(data.total || data.totalPrice || (Number(data.referencePrice || data.price || 0) + Number(data.deliveryFee || data.freightFee || 0))),
+      recipientName: data.recipientName || data.customerName || "",
+      recipientPhone: data.recipientPhone || "",
+      deliveryCity: data.city || data.deliveryCity || "Pirapora",
+      deliveryAddress: data.address || data.deliveryAddress || "",
+      deliveryNeighborhood: data.neighborhood || data.deliveryNeighborhood || "",
+      deliveryReference: data.reference || data.deliveryReference || "",
+      deliveryDate: data.deliveryDate || "",
+      timeSlot: data.timeSlot || "",
+      cardMessage: data.cardMessage || "",
+      paymentMethod: (data.paymentMethod || "PIX").toLowerCase(),
+      status: data.status || "pedido",
+      photoProofUrl: data.photoProofUrl || ""
+    };
+
+    // Insere o novo pedido no início da lista
+    existingOrders.unshift(newOrderObj);
+    writeJSONFile(folder, "pedidos.json", existingOrders);
 
     return ContentService.createTextOutput(JSON.stringify({
       success: true,
-      message: "Pedido " + orderNum + " gravado com sucesso!",
-      orderNumber: orderNum
+      message: "Pedido " + orderNum + " gravado com sucesso no arquivo pedidos.json no Google Drive!",
+      orderNumber: orderNum,
+      folderUrl: folder.getUrl()
     })).setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
@@ -1510,206 +1127,6 @@ function doPost(e) {
     lock.releaseLock();
   }
 }
-
-function doGet(e) {
-  try {
-    var ss = getSpreadsheet();
-    if (!ss) {
-      return ContentService.createTextOutput(JSON.stringify({
-        success: false,
-        error: "Planilha nao encontrada."
-      })).setMimeType(ContentService.MimeType.JSON);
-    }
-
-    setupAllTabs(ss);
-    
-    var orders = [];
-    var seenOrderNumbers = {};
-    var allSheets = ss.getSheets();
-
-    for (var sIdx = 0; sIdx < allSheets.length; sIdx++) {
-      var currSheet = allSheets[sIdx];
-      var sName = currSheet.getName().toLowerCase().trim();
-
-      if (
-        sName === "produtos" ||
-        sName === "catalogo" ||
-        sName === "catálogo" ||
-        sName === "categorias" ||
-        sName === "clientes"
-      ) {
-        continue;
-      }
-
-      var rowsP = currSheet.getDataRange().getValues();
-      if (rowsP.length > 1) {
-        var headersP = rowsP[0].map(function (h) {
-          return h.toString().toLowerCase().trim();
-        });
-
-        var idxOrderNum = headersP.indexOf("numero pedido");
-        if (idxOrderNum === -1) idxOrderNum = headersP.indexOf("pedido");
-        if (idxOrderNum === -1) idxOrderNum = 0;
-
-        var idxDate = headersP.indexOf("data criacao");
-        if (idxDate === -1) idxDate = headersP.indexOf("data");
-        if (idxDate === -1) idxDate = 1;
-
-        var idxCustomer = headersP.indexOf("cliente / remetente");
-        if (idxCustomer === -1) idxCustomer = headersP.indexOf("cliente");
-        if (idxCustomer === -1) idxCustomer = 2;
-
-        var idxPhone = headersP.indexOf("whatsapp cliente");
-        if (idxPhone === -1) idxPhone = headersP.indexOf("whatsapp");
-        if (idxPhone === -1) idxPhone = 3;
-
-        var idxBirth = headersP.indexOf("aniversario cliente");
-        if (idxBirth === -1) idxBirth = headersP.indexOf("aniversario");
-        if (idxBirth === -1) idxBirth = 4;
-
-        var idxProd = headersP.indexOf("produto / arranjo");
-        if (idxProd === -1) idxProd = headersP.indexOf("produto");
-        if (idxProd === -1) idxProd = 5;
-
-        var idxCat = headersP.indexOf("categoria");
-        if (idxCat === -1) idxCat = 6;
-
-        var idxRefPrice = headersP.indexOf("preco referencia item (r$)");
-        if (idxRefPrice === -1) idxRefPrice = headersP.indexOf("preco referencia");
-        if (idxRefPrice === -1) idxRefPrice = 7;
-
-        var idxFreight = headersP.indexOf("custo de frete (r$)");
-        if (idxFreight === -1) idxFreight = headersP.indexOf("frete");
-        if (idxFreight === -1) idxFreight = 8;
-
-        var idxTotal = headersP.indexOf("valor total estimado (r$)");
-        if (idxTotal === -1) idxTotal = headersP.indexOf("total");
-        if (idxTotal === -1) idxTotal = 9;
-
-        var idxAddress = headersP.indexOf("endereco completo");
-        if (idxAddress === -1) idxAddress = headersP.indexOf("endereco de entrega");
-        if (idxAddress === -1) idxAddress = headersP.indexOf("endereco");
-        if (idxAddress === -1) idxAddress = 13;
-
-        var idxCity = headersP.indexOf("cidade de entrega");
-        if (idxCity === -1) idxCity = headersP.indexOf("cidade");
-        if (idxCity === -1) idxCity = 12;
-
-        var idxDelDate = headersP.indexOf("data de entrega");
-        if (idxDelDate === -1) idxDelDate = 16;
-
-        var idxCard = headersP.indexOf("mensagem do cartao");
-        if (idxCard === -1) idxCard = 18;
-
-        var idxPay = headersP.indexOf("forma pagamento");
-        if (idxPay === -1) idxPay = 19;
-
-        var idxStat = headersP.indexOf("status kanban");
-        if (idxStat === -1) idxStat = headersP.indexOf("status");
-        if (idxStat === -1) idxStat = 20;
-
-        for (var p = 1; p < rowsP.length; p++) {
-          var row = rowsP[p];
-          if (!row[0] && !row[1] && !row[2] && !row[5]) continue;
-
-          var orderNumVal = row[idxOrderNum] ? row[idxOrderNum].toString().trim() : ("#PAP-" + (1000 + p));
-          if (!orderNumVal || orderNumVal === "") continue;
-
-          var dedupeKey = orderNumVal.toLowerCase();
-          if (seenOrderNumbers[dedupeKey]) continue;
-          seenOrderNumbers[dedupeKey] = true;
-
-          orders.push({
-            id: "sheet-order-" + sIdx + "-" + p + "-" + orderNumVal.replace(/[^a-zA-Z0-9]/g, ""),
-            orderNumber: orderNumVal,
-            createdAt: row[idxDate] ? row[idxDate].toString() : new Date().toISOString(),
-            customerName: row[idxCustomer] ? row[idxCustomer].toString() : "Cliente",
-            customerPhone: row[idxPhone] ? row[idxPhone].toString() : "",
-            customerBirthDate: row[idxBirth] ? row[idxBirth].toString() : "",
-            productName: row[idxProd] ? row[idxProd].toString() : "Arranjo Floral",
-            category: row[idxCat] ? row[idxCat].toString() : "Arranjos",
-            referencePrice: Number(row[idxRefPrice]) || 0,
-            freightFee: Number(row[idxFreight]) || 0,
-            totalPrice: Number(row[idxTotal]) || (Number(row[idxRefPrice]) || 0) + (Number(row[idxFreight]) || 0),
-            deliveryAddress: row[idxAddress] ? row[idxAddress].toString() : "",
-            deliveryCity: row[idxCity] ? row[idxCity].toString() : "Pirapora",
-            deliveryDate: row[idxDelDate] ? row[idxDelDate].toString() : "",
-            cardMessage: row[idxCard] ? row[idxCard].toString() : "",
-            paymentMethod: row[idxPay] ? row[idxPay].toString().toLowerCase() : "pix",
-            status: row[idxStat] ? row[idxStat].toString().toLowerCase() : "pedido"
-          });
-        }
-      }
-    }
-
-    var catalog = [];
-    var sheetCatalogo = ss.getSheetByName("Produtos") || ss.getSheetByName("Catalogo");
-    if (sheetCatalogo && sheetCatalogo.getDataRange().getValues().length > 1) {
-      var rowsC = sheetCatalogo.getDataRange().getValues();
-      for (var c = 1; c < rowsC.length; c++) {
-        var rC = rowsC[c];
-        if (!rC[1]) continue;
-        catalog.push({
-          id: rC[0] ? rC[0].toString() : ("prod-" + c),
-          name: rC[1].toString(),
-          slug: rC[2] ? rC[2].toString() : rC[1].toString().toLowerCase().replace(/[^a-z0-9]/g, "-"),
-          category: rC[3] ? rC[3].toString() : "geral",
-          price: rC[4] !== "" ? Number(rC[4]) : undefined,
-          referencePrice: rC[5] !== "" ? Number(rC[5]) : undefined,
-          originalPrice: rC[6] !== "" ? Number(rC[6]) : undefined,
-          isPriceOnDemand: rC[7] && rC[7].toString().toLowerCase() === "sim",
-          occasion: rC[8] ? rC[8].toString().split(",").map(function(s) { return s.trim(); }) : [],
-          flowerType: rC[9] ? rC[9].toString().split(",").map(function(s) { return s.trim(); }) : [],
-          imageUrl: rC[10] ? rC[10].toString() : "",
-          description: rC[11] ? rC[11].toString() : "",
-          details: {
-            itemsIncluded: rC[12] ? rC[12].toString().split(";").map(function(s) { return s.trim(); }) : [],
-            careInstructions: rC[13] ? rC[13].toString() : ""
-          },
-          tags: rC[14] ? rC[14].toString().split(",").map(function(s) { return s.trim(); }) : [],
-          rating: Number(rC[15]) || 5,
-          reviewCount: Number(rC[16]) || 0,
-          inStock: !rC[17] || rC[17].toString().toLowerCase() !== "nao",
-          orderCount: Number(rC[18]) || 10
-        });
-      }
-    }
-
-    var categories = [];
-    var sheetCategorias = ss.getSheetByName("Categorias");
-    if (sheetCategorias && sheetCategorias.getDataRange().getValues().length > 1) {
-      var rowsCat = sheetCategorias.getDataRange().getValues();
-      for (var k = 1; k < rowsCat.length; k++) {
-        var rCat = rowsCat[k];
-        if (!rCat[1]) continue;
-        categories.push({
-          id: rCat[0] ? rCat[0].toString() : ("cat-" + k),
-          slug: rCat[0] ? rCat[0].toString() : rCat[1].toString().toLowerCase().replace(/[^a-z0-9]/g, "-"),
-          name: rCat[1].toString(),
-          icon: rCat[2] ? rCat[2].toString() : "Flor",
-          description: rCat[3] ? rCat[3].toString() : "",
-          active: !rCat[4] || rCat[4].toString().toLowerCase() !== "nao"
-        });
-      }
-    }
-
-    var result = {
-      success: true,
-      orders: orders,
-      catalog: catalog,
-      products: catalog,
-      categories: categories,
-      timestamp: new Date().toISOString()
-    };
-
-    return ContentService.createTextOutput(JSON.stringify(result))
-      .setMimeType(ContentService.MimeType.JSON);
-
-  } catch (err) {
-    return ContentService.createTextOutput(JSON.stringify({
-      success: false,
-      error: err.toString()
-    })).setMimeType(ContentService.MimeType.JSON);
-  }
-}
 `;
+
+export const GOOGLE_APPS_SCRIPT_MASTER_CODE = GOOGLE_APPS_SCRIPT_DRIVE_JSON_CODE;

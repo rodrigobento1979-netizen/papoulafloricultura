@@ -203,18 +203,18 @@ export default function App() {
     } catch (e) {}
   }, [storeConfig]);
 
-  // Automatic Background Synchronization with Google Sheets (Orders, Catalog, Categories)
+  // Automatic Background Synchronization with Google Drive JSON Files (pedidos.json, catalogo.json, categorias.json)
   useEffect(() => {
-    const webhookUrl = googleDriveConfig?.sheetWebhookUrl?.trim() || "";
-    const spreadsheetId = googleDriveConfig?.spreadsheetId?.trim() || "";
+    const driveWebhookUrl = googleDriveConfig?.driveWebhookUrl?.trim() || googleDriveConfig?.sheetWebhookUrl?.trim() || "";
     const folderUrl = googleDriveConfig?.folderUrl?.trim() || "";
+    const folderId = googleDriveConfig?.folderId?.trim() || "";
     const isAutoSyncEnabled = googleDriveConfig?.autoSync === true;
 
-    // Verify if there is a valid URL or spreadsheet ID configured
+    // Verify if there is a valid URL or folder configured
     const hasValidTarget =
-      (webhookUrl.startsWith("http://") || webhookUrl.startsWith("https://")) ||
-      (spreadsheetId.length > 5 && !spreadsheetId.includes(" ")) ||
-      (folderUrl.startsWith("http://") || folderUrl.startsWith("https://"));
+      (driveWebhookUrl.startsWith("http://") || driveWebhookUrl.startsWith("https://")) ||
+      (folderUrl.startsWith("http://") || folderUrl.startsWith("https://")) ||
+      (folderId.length > 5 && !folderId.includes(" "));
 
     // If auto-sync is off or no valid credentials configured, skip auto sync
     if (!isAutoSyncEnabled || !hasValidTarget) return;
@@ -222,8 +222,8 @@ export default function App() {
     // Run synchronization function
     const runAutoSync = async (silent = true) => {
       try {
-        const { fetchStoreDataFromGoogleSheets, mergeOrders } = await import("./utils/googleDriveSync");
-        const res = await fetchStoreDataFromGoogleSheets(webhookUrl, spreadsheetId, folderUrl);
+        const { fetchStoreDataFromGoogleDrive, mergeOrders } = await import("./utils/googleDriveSync");
+        const res = await fetchStoreDataFromGoogleDrive(driveWebhookUrl, folderUrl, folderId);
         
         if (res.success) {
           // 1. Sync Orders
@@ -231,13 +231,13 @@ export default function App() {
             setKanbanOrders((prevOrders) => {
               const { merged, addedCount, updatedCount } = mergeOrders(prevOrders, res.orders);
               if (!silent && (addedCount > 0 || updatedCount > 0)) {
-                console.log(`[AutoSync] ${addedCount} novos pedidos adicionados, ${updatedCount} atualizados.`);
+                console.log(`[AutoSync Drive JSON] ${addedCount} novos pedidos adicionados, ${updatedCount} atualizados.`);
               }
               return merged;
             });
           }
 
-          // 2. Sync Catalog (if sheets contains products)
+          // 2. Sync Catalog (if Drive contains products)
           if (Array.isArray(res.products) && res.products.length > 0) {
             setProducts((prevProds) => {
               if (prevProds.length === 0) return res.products;
@@ -245,7 +245,7 @@ export default function App() {
             });
           }
 
-          // 3. Sync Categories (if sheets contains categories)
+          // 3. Sync Categories (if Drive contains categories)
           if (Array.isArray(res.categories) && res.categories.length > 0) {
             setCategories((prevCats) => {
               if (prevCats.length === 0) return res.categories;
@@ -273,7 +273,7 @@ export default function App() {
     }, 120000); // 2 minutes
 
     return () => clearInterval(interval);
-  }, [googleDriveConfig?.sheetWebhookUrl, googleDriveConfig?.spreadsheetId, googleDriveConfig?.folderUrl, googleDriveConfig?.autoSync]);
+  }, [googleDriveConfig?.driveWebhookUrl, googleDriveConfig?.sheetWebhookUrl, googleDriveConfig?.folderUrl, googleDriveConfig?.folderId, googleDriveConfig?.autoSync]);
 
   // Filters and search state
   const [selectedCategory, setSelectedCategory] = useState<string>("todos");

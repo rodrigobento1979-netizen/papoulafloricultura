@@ -166,9 +166,11 @@ export interface Review {
 }
 
 export interface GoogleDriveConfig {
-  sheetWebhookUrl?: string; // Google Apps Script Webhook URL or Google Sheets API endpoint
-  spreadsheetId?: string;
-  folderUrl?: string;
+  driveWebhookUrl?: string; // Web App URL do Google Apps Script (Drive JSON)
+  folderUrl?: string; // Link da pasta compartilhada do Google Drive
+  folderId?: string; // ID da pasta do Google Drive
+  sheetWebhookUrl?: string; // Retrocompatibilidade
+  spreadsheetId?: string; // Retrocompatibilidade
   autoSync: boolean;
   lastSyncedAt?: string;
 }

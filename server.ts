@@ -57,49 +57,34 @@ const fallbackMessages: Record<string, string[]> = {
   ],
 };
 
-// API Endpoint for syncing orders, catalog and categories with Google Sheets / Apps Script Webhook
-app.post("/api/sync-sheets", async (req, res) => {
+// API Endpoint for syncing orders, catalog and categories with Google Drive JSON / Apps Script Webhook
+const handleSyncDriveRequest = async (req: express.Request, res: express.Response) => {
   try {
-    const { url, spreadsheetId, folderUrl, action, products, categories, catalog, orders } = req.body;
+    const { url, folderUrl, folderId, spreadsheetId, action, products, categories, catalog, orders } = req.body;
     let target = (url || "").trim();
-    const sheetId = (spreadsheetId || "").trim();
     const folder = (folderUrl || "").trim();
+    const fId = (folderId || "").trim();
+    const sheetId = (spreadsheetId || "").trim();
 
-    // If target is empty, try folderUrl or spreadsheetId
+    // If target is empty, check folderUrl or spreadsheetId
     if (!target) {
-      if (folder && folder.includes("spreadsheets")) {
+      if (folder && folder.startsWith("http")) {
         target = folder;
       } else if (sheetId) {
         target = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv`;
       }
     }
 
-    if (!target && !sheetId) {
+    if (!target && !sheetId && !folder && !fId) {
       return res.status(400).json({
         success: false,
-        error: "Informe a URL do Webhook do Google Apps Script ou o Link da Planilha do Google Sheets nas configurações.",
+        error: "Informe a URL do Web App do Google Apps Script ou o Link da Pasta do Google Drive nas configurações.",
       });
     }
 
-    // Helper to extract Google Sheet ID
-    const extractSheetId = (str: string): string | null => {
-      if (!str) return null;
-      const match = str.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-      if (match) return match[1];
-      if (!str.startsWith("http") && str.length > 20 && !str.includes("/")) {
-        return str.trim();
-      }
-      return null;
-    };
-
-    const directSheetId =
-      extractSheetId(target) ||
-      extractSheetId(sheetId) ||
-      extractSheetId(folder);
-
-    // Strategy 1: If it is a Google Apps Script Web App URL
+    // Strategy 1: If it is a Google Apps Script Web App URL (Google Drive JSON)
     if (target.includes("script.google.com")) {
-      // If it's a write action (syncCatalog, syncCategories, syncAll, newOrder)
+      // If it's a write action (saveOrders, saveCatalog, saveCategories, syncAll, newOrder)
       if (action && action !== "getOrders" && action !== "getData" && action !== "list") {
         try {
           const postRes = await fetch(target, {
@@ -119,7 +104,7 @@ app.post("/api/sync-sheets", async (req, res) => {
               const jsonData = JSON.parse(text);
               return res.json(jsonData);
             } catch {
-              return res.json({ success: true, message: "Dados enviados com sucesso para o Apps Script!" });
+              return res.json({ success: true, message: "Dados enviados com sucesso para o Google Drive via Apps Script!" });
             }
           }
         } catch (postErr) {
@@ -133,7 +118,7 @@ app.post("/api/sync-sheets", async (req, res) => {
         scriptUrl = `${scriptUrl}${sep}_t=${Date.now()}`;
       }
 
-      // 1A: Try GET request to read data
+      // 1A: Try GET request to read data directly from Google Drive JSON files
       try {
         const getRes = await fetch(scriptUrl, {
           method: "GET",
@@ -152,6 +137,9 @@ app.post("/api/sync-sheets", async (req, res) => {
               if (jsonData) {
                 return res.json({
                   success: true,
+                  folderName: jsonData.folderName,
+                  folderUrl: jsonData.folderUrl,
+                  folderId: jsonData.folderId,
                   orders: jsonData.orders || (Array.isArray(jsonData) ? jsonData : []),
                   catalog: jsonData.catalog || jsonData.products || [],
                   products: jsonData.products || jsonData.catalog || [],
@@ -168,7 +156,7 @@ app.post("/api/sync-sheets", async (req, res) => {
         console.warn("GET to Apps Script failed, trying POST fallback:", getErr);
       }
 
-      // 1B: Try POST request with action: 'getData' / 'getOrders'
+      // 1B: Try POST request with action: 'getData'
       try {
         const postRes = await fetch(target, {
           method: "POST",
@@ -189,6 +177,9 @@ app.post("/api/sync-sheets", async (req, res) => {
               if (jsonData) {
                 return res.json({
                   success: true,
+                  folderName: jsonData.folderName,
+                  folderUrl: jsonData.folderUrl,
+                  folderId: jsonData.folderId,
                   orders: jsonData.orders || (Array.isArray(jsonData) ? jsonData : []),
                   catalog: jsonData.catalog || jsonData.products || [],
                   products: jsonData.products || jsonData.catalog || [],
@@ -205,6 +196,22 @@ app.post("/api/sync-sheets", async (req, res) => {
         console.warn("POST to Apps Script failed:", postErr);
       }
     }
+
+    // Helper to extract Google Sheet ID for backwards compatibility
+    const extractSheetId = (str: string): string | null => {
+      if (!str) return null;
+      const match = str.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (match) return match[1];
+      if (!str.startsWith("http") && str.length > 20 && !str.includes("/")) {
+        return str.trim();
+      }
+      return null;
+    };
+
+    const directSheetId =
+      extractSheetId(target) ||
+      extractSheetId(sheetId) ||
+      extractSheetId(folder);
 
     // Strategy 2: If we have a Google Sheet ID, fetch direct CSV export from all relevant sheets
     if (directSheetId) {
@@ -296,16 +303,19 @@ app.post("/api/sync-sheets", async (req, res) => {
 
     return res.json({
       success: false,
-      error: "Não foi possível carregar a planilha. Verifique se o link está correto e se o compartilhamento está como 'Qualquer pessoa com o link'.",
+      error: "Não foi possível carregar os arquivos JSON. Verifique se o link da pasta do Google Drive ou Web App está correto.",
     });
   } catch (err: any) {
-    console.error("Error in /api/sync-sheets:", err);
+    console.error("Error in sync-drive handler:", err);
     return res.status(500).json({
       success: false,
-      error: `Erro ao conectar com a planilha: ${err.message || "Erro desconhecido"}`,
+      error: `Erro ao conectar com o Google Drive: ${err.message || "Erro desconhecido"}`,
     });
   }
-});
+};
+
+app.post("/api/sync-drive", handleSyncDriveRequest);
+app.post("/api/sync-sheets", handleSyncDriveRequest);
 
 // API Endpoint for generating romantic/personalized card dedication
 app.post("/api/generate-card-message", async (req, res) => {

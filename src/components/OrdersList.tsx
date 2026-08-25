@@ -19,8 +19,9 @@ import { EditOrderModal } from "./EditOrderModal";
 import { 
   exportOrdersToCSV, 
   downloadCSV, 
-  fetchOrdersFromGoogleSheets, 
-  parseOrdersFromCSV, 
+  fetchStoreDataFromGoogleDrive, 
+  parseOrdersFromJSON, 
+  downloadOrdersJSON,
   mergeOrders 
 } from "../utils/googleDriveSync";
 import { buildWhatsAppUrl } from "../utils/whatsapp";
@@ -123,48 +124,48 @@ export const OrdersList: React.FC<OrdersListProps> = ({
   };
 
   const handleSyncFromSheets = async () => {
-    const webhookUrl = googleDriveConfig?.sheetWebhookUrl || "";
-    const spreadsheetId = googleDriveConfig?.spreadsheetId || "";
+    const webhookUrl = googleDriveConfig?.driveWebhookUrl || googleDriveConfig?.sheetWebhookUrl || "";
     const folderUrl = googleDriveConfig?.folderUrl || "";
+    const folderId = googleDriveConfig?.folderId || "";
 
-    const target = webhookUrl || spreadsheetId || (folderUrl.includes("spreadsheets") ? folderUrl : "");
+    const target = webhookUrl || folderUrl || folderId;
 
     if (!target || !target.trim()) {
-      showSyncToast("info", "Abra as configurações do Google Drive para informar a URL do Webhook ou Link da Planilha.");
+      showSyncToast("info", "Abra as configurações do Google Drive para informar a URL do Webhook do Google Apps Script.");
       if (onOpenDatabaseSettings) onOpenDatabaseSettings();
       return;
     }
 
     setIsSyncing(true);
     try {
-      const result = await fetchOrdersFromGoogleSheets(webhookUrl, spreadsheetId, folderUrl);
+      const result = await fetchStoreDataFromGoogleDrive(webhookUrl, folderUrl, folderId);
       if (result.success && result.orders.length > 0) {
         if (onBatchImportOrders) {
           const { merged, addedCount, updatedCount } = mergeOrders(orders, result.orders);
           onBatchImportOrders(merged);
           showSyncToast(
             "success",
-            `✅ Planilha sincronizada! ${result.orders.length} pedidos carregados (${addedCount} novos, ${updatedCount} atualizados).`
+            `✅ Google Drive sincronizado! ${result.orders.length} pedidos em 'pedidos.json' (${addedCount} novos, ${updatedCount} atualizados).`
           );
         } else {
-          showSyncToast("success", `✅ ${result.orders.length} pedidos encontrados na planilha.`);
+          showSyncToast("success", `✅ ${result.orders.length} pedidos encontrados no arquivo pedidos.json.`);
         }
       } else if (result.success && result.orders.length === 0) {
-        showSyncToast("info", "Planilha conectada com sucesso, mas nenhuma linha de pedido foi encontrada.");
+        showSyncToast("info", "Google Drive conectado com sucesso, mas o arquivo pedidos.json está vazio.");
       } else {
         showSyncToast(
           "error",
-          result.message || "Não foi possível carregar os pedidos. Verifique se o Web App está publicado como 'Qualquer Pessoa' (Anyone)."
+          result.message || "Não foi possível carregar os pedidos. Verifique se o Web App do Google Apps Script está ativo."
         );
       }
     } catch (err: any) {
-      showSyncToast("error", err.message || "Erro de conexão ao buscar planilha.");
+      showSyncToast("error", err.message || "Erro de conexão ao buscar pedidos no Google Drive.");
     } finally {
       setIsSyncing(false);
     }
   };
 
-  const handleCSVUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleJSONUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
@@ -172,21 +173,21 @@ export const OrdersList: React.FC<OrdersListProps> = ({
     reader.onload = (evt) => {
       try {
         const text = evt.target?.result as string;
-        const parsed = parseOrdersFromCSV(text);
+        const parsed = parseOrdersFromJSON(text);
         if (parsed.length > 0) {
           if (onBatchImportOrders) {
             const { merged, addedCount, updatedCount } = mergeOrders(orders, parsed);
             onBatchImportOrders(merged);
             showSyncToast(
               "success",
-              `✅ Arquivo CSV importado! ${parsed.length} pedidos lidos (${addedCount} novos, ${updatedCount} atualizados).`
+              `✅ Arquivo pedidos.json importado! ${parsed.length} pedidos lidos (${addedCount} novos, ${updatedCount} atualizados).`
             );
           }
         } else {
-          showSyncToast("error", "Nenhum pedido válido encontrado no arquivo CSV.");
+          showSyncToast("error", "Nenhum pedido válido encontrado no arquivo JSON.");
         }
       } catch (err: any) {
-        showSyncToast("error", "Erro ao processar arquivo CSV: " + err.message);
+        showSyncToast("error", "Erro ao processar arquivo JSON: " + err.message);
       }
     };
     reader.readAsText(file, "UTF-8");
@@ -281,9 +282,7 @@ export const OrdersList: React.FC<OrdersListProps> = ({
   }, 0);
 
   const handleExportCSV = () => {
-    const csv = exportOrdersToCSV(filteredOrders);
-    const date = new Date().toISOString().split("T")[0];
-    downloadCSV(`pedidos_papoula_${date}.csv`, csv);
+    downloadOrdersJSON(filteredOrders);
   };
 
   return (
@@ -420,37 +419,37 @@ export const OrdersList: React.FC<OrdersListProps> = ({
               onClick={handleSyncFromSheets}
               disabled={isSyncing}
               className="p-2.5 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl shadow-2xs transition-all cursor-pointer hover:scale-105 disabled:opacity-60 flex items-center justify-center"
-              title="Sincronizar com a Planilha Google"
-              aria-label="Sincronizar Planilha Google"
+              title="Ler pedidos.json do Google Drive"
+              aria-label="Ler pedidos do Google Drive"
             >
               <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin text-amber-300" : "text-amber-300"}`} />
             </button>
 
-            {/* Import CSV Icon Button */}
+            {/* Import JSON Icon Button */}
             <input
               ref={fileInputRef}
               type="file"
-              accept=".csv"
-              onChange={handleCSVUpload}
+              accept=".json"
+              onChange={handleJSONUpload}
               className="hidden"
             />
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               className="p-2.5 bg-stone-100 hover:bg-emerald-50 text-stone-800 hover:text-emerald-950 border border-stone-300 rounded-xl transition-all cursor-pointer hover:scale-105 flex items-center justify-center"
-              title="Importar Pedidos via CSV"
-              aria-label="Importar Pedidos CSV"
+              title="Importar pedidos.json do Computador/Celular"
+              aria-label="Importar pedidos.json"
             >
               <Upload className="w-4 h-4 text-emerald-800" />
             </button>
 
-            {/* Export CSV Icon Button */}
+            {/* Export JSON Icon Button */}
             <button
               type="button"
               onClick={handleExportCSV}
               className="p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl transition-all cursor-pointer hover:scale-105 flex items-center justify-center"
-              title="Exportar Pedidos para CSV"
-              aria-label="Exportar Pedidos CSV"
+              title="Baixar pedidos.json"
+              aria-label="Baixar pedidos.json"
             >
               <Download className="w-4 h-4 text-emerald-700" />
             </button>

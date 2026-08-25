@@ -16,7 +16,7 @@ import {
   Info
 } from "lucide-react";
 import { Product, ProductSize, GoogleDriveConfig } from "../types";
-import { sendOrderToGoogleSheetsWebhook } from "../utils/googleDriveSync";
+import { sendOrderToGoogleDrive } from "../utils/googleDriveSync";
 import { openWhatsApp } from "../utils/whatsapp";
 
 interface WhatsAppOrderModalProps {
@@ -142,13 +142,14 @@ ${recipientPhone.trim() ? `• *Telefone Destinatário:* ${recipientPhone.trim()
 💳 *Forma de Pagamento:* PIX
 👉 *Por favor, confirme a disponibilidade, o valor total e me envie a chave PIX para pagamento!* ✨`;
 
-    // Try sending directly to configured Google Apps Script Webhook
+    // Try sending directly to configured Google Apps Script (Drive JSON Webhook)
     try {
       const storedConfig = localStorage.getItem("papoula_gdrive_config");
       if (storedConfig) {
         const parsed: GoogleDriveConfig = JSON.parse(storedConfig);
-        if (parsed.sheetWebhookUrl && parsed.autoSync) {
-          sendOrderToGoogleSheetsWebhook(parsed.sheetWebhookUrl, {
+        const webhookUrl = parsed.driveWebhookUrl || parsed.sheetWebhookUrl;
+        if (webhookUrl && parsed.autoSync) {
+          sendOrderToGoogleDrive(webhookUrl, {
             orderNumber: orderNum,
             productName: `${product.name}${sizeInfo}`,
             price: currentPrice,
@@ -169,7 +170,7 @@ ${recipientPhone.trim() ? `• *Telefone Destinatário:* ${recipientPhone.trim()
         }
       }
     } catch (e) {
-      console.warn("Could not sync with Google Sheets:", e);
+      console.warn("Could not sync with Google Drive JSON:", e);
     }
 
     openWhatsApp("5538988512855", msg);

@@ -44,7 +44,8 @@ import {
   SlidersHorizontal,
   Instagram,
   Pencil,
-  Send
+  Send,
+  HardDrive
 } from "lucide-react";
 import { Product, Category, Customer, KanbanOrder, KanbanOrderStatus, GoogleDriveConfig, StoreConfig } from "../types";
 import { PapoulaLogo } from "./PapoulaLogo";
@@ -59,12 +60,23 @@ import {
   exportCategoriesToCSV, 
   downloadCSV, 
   downloadOfficialSpreadsheetTemplate, 
-  sendOrderToGoogleSheetsWebhook,
-  syncCatalogToGoogleSheets,
-  syncCategoriesToGoogleSheets,
-  syncAllToGoogleSheets,
+  sendOrderToGoogleDrive,
+  saveCatalogToGoogleDrive,
+  saveCategoriesToGoogleDrive,
+  saveAllToGoogleDrive,
+  saveOrdersToGoogleDrive,
   parseCatalogFromCSV,
-  parseCategoriesFromCSV
+  parseCategoriesFromCSV,
+  exportOrdersToJSON,
+  exportCatalogToJSON,
+  exportCategoriesToJSON,
+  parseOrdersFromJSON,
+  parseCatalogFromJSON,
+  parseCategoriesFromJSON,
+  downloadOrdersJSON,
+  downloadCatalogJSON,
+  downloadCategoriesJSON,
+  downloadJSON
 } from "../utils/googleDriveSync";
 import { calculateStarRating, getStoreBusinessHours, DEFAULT_STORE_CONFIG } from "../utils/businessHours";
 import { buildWhatsAppUrl } from "../utils/whatsapp";
@@ -677,6 +689,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showNotification("Download do CSV de Pedidos iniciado!");
   };
 
+  const handleDownloadOrdersJSON = () => {
+    downloadOrdersJSON(kanbanOrders);
+    showNotification(`📥 Arquivo pedidos.json baixado com sucesso (${kanbanOrders.length} pedidos)!`);
+  };
+
+  const handleDownloadCatalogJSON = () => {
+    downloadCatalogJSON(products, categories);
+    showNotification(`📥 Arquivo catalogo.json baixado com sucesso (${products.length} produtos e ${categories.length} categorias)!`);
+  };
+
+  const handleImportOrdersJSONFile = (e: React.ChangeEvent<HTMLInputElement>, replaceMode: boolean = false) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const text = evt.target?.result as string;
+        const parsedOrders = parseOrdersFromJSON(text);
+        if (parsedOrders.length === 0) {
+          alert("Nenhum pedido válido encontrado no arquivo JSON selecionado.");
+          return;
+        }
+
+        if (replaceMode) {
+          if (onBatchImportOrders) {
+            onBatchImportOrders(parsedOrders);
+          }
+          showNotification(`✅ ${parsedOrders.length} pedidos restaurados do arquivo pedidos.json (Substituição Completa)!`);
+        } else {
+          // Merge with existing orders
+          const existingIds = new Set(kanbanOrders.map((o) => o.id));
+          const existingNumbers = new Set(kanbanOrders.map((o) => o.orderNumber));
+          const toAdd: KanbanOrder[] = [];
+          
+          parsedOrders.forEach((o) => {
+            if (!existingIds.has(o.id) && !existingNumbers.has(o.orderNumber)) {
+              toAdd.push(o);
+            }
+          });
+
+          if (toAdd.length > 0) {
+            const merged = [...toAdd, ...kanbanOrders];
+            if (onBatchImportOrders) {
+              onBatchImportOrders(merged);
+            }
+            showNotification(`✅ ${toAdd.length} novos pedidos importados e mesclados com sucesso!`);
+          } else {
+            showNotification(`ℹ️ Todos os ${parsedOrders.length} pedidos do arquivo já constam no sistema.`);
+          }
+        }
+      } catch (err: any) {
+        console.error("Erro ao importar pedidos.json:", err);
+        alert("Erro ao ler o arquivo JSON de pedidos: " + (err.message || "Formato inválido"));
+      } finally {
+        e.target.value = "";
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handleImportCatalogJSONFile = (e: React.ChangeEvent<HTMLInputElement>, replaceMode: boolean = false) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const text = evt.target?.result as string;
+        const { products: parsedProducts, categories: parsedCategories } = parseCatalogFromJSON(text);
+        
+        if (parsedProducts.length === 0 && parsedCategories.length === 0) {
+          alert("Nenhum produto ou categoria válida encontrada no arquivo JSON selecionado.");
+          return;
+        }
+
+        if (onBatchImportProducts) {
+          onBatchImportProducts(parsedProducts, parsedCategories, replaceMode);
+        }
+        showNotification(
+          `✅ Catálogo importado com sucesso: ${parsedProducts.length} produtos e ${parsedCategories.length} categorias!`
+        );
+      } catch (err: any) {
+        console.error("Erro ao importar catalogo.json:", err);
+        alert("Erro ao ler o arquivo JSON do catálogo: " + (err.message || "Formato inválido"));
+      } finally {
+        e.target.value = "";
+      }
+    };
+    reader.readAsText(file);
+  };
+
   const handleDownloadCustomersCSV = () => {
     const csv = exportCustomersToCSV(customers);
     const date = new Date().toISOString().split("T")[0];
@@ -702,8 +806,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showNotification("Download do CSV de Categorias iniciado!");
   };
 
+  const handleDownloadCategoriesJSON = () => {
+    downloadCategoriesJSON(categories);
+    showNotification(`📥 Arquivo categorias.json baixado com sucesso (${categories.length} categorias)!`);
+  };
+
   const handlePushCatalogToSheets = async () => {
-    const url = googleDriveConfig.sheetWebhookUrl || sheetWebhookUrl;
+    const url = googleDriveConfig.driveWebhookUrl || googleDriveConfig.sheetWebhookUrl || sheetWebhookUrl;
     if (!url?.trim()) {
       showNotification("Configure primeiro a URL do Webhook na aba Banco Google Drive.");
       setActiveMenu("database");
@@ -711,17 +820,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     setIsPushingCatalog(true);
     try {
-      const res = await syncCatalogToGoogleSheets(url.trim(), products);
-      showNotification(res.success ? "✅ Catálogo salvo na planilha com sucesso (aba Catalogo)!" : `⚠️ ${res.message}`);
+      const res = await saveCatalogToGoogleDrive(url.trim(), products);
+      showNotification(res.success ? "✅ catalogo.json salvo no Google Drive com sucesso!" : `⚠️ ${res.message}`);
     } catch (e: any) {
-      showNotification("Erro ao salvar catálogo: " + e.message);
+      showNotification("Erro ao salvar catalogo.json: " + e.message);
     } finally {
       setIsPushingCatalog(false);
     }
   };
 
   const handlePushCategoriesToSheets = async () => {
-    const url = googleDriveConfig.sheetWebhookUrl || sheetWebhookUrl;
+    const url = googleDriveConfig.driveWebhookUrl || googleDriveConfig.sheetWebhookUrl || sheetWebhookUrl;
     if (!url?.trim()) {
       showNotification("Configure primeiro a URL do Webhook na aba Banco Google Drive.");
       setActiveMenu("database");
@@ -729,17 +838,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     setIsPushingCategories(true);
     try {
-      const res = await syncCategoriesToGoogleSheets(url.trim(), categories);
-      showNotification(res.success ? "✅ Categorias salvas na planilha com sucesso (aba Categorias)!" : `⚠️ ${res.message}`);
+      const res = await saveCategoriesToGoogleDrive(url.trim(), categories);
+      showNotification(res.success ? "✅ categorias.json salvas no Google Drive com sucesso!" : `⚠️ ${res.message}`);
     } catch (e: any) {
-      showNotification("Erro ao salvar categorias: " + e.message);
+      showNotification("Erro ao salvar categorias.json: " + e.message);
     } finally {
       setIsPushingCategories(false);
     }
   };
 
   const handleSyncAllToSheets = async () => {
-    const url = googleDriveConfig.sheetWebhookUrl || sheetWebhookUrl;
+    const url = googleDriveConfig.driveWebhookUrl || googleDriveConfig.sheetWebhookUrl || sheetWebhookUrl;
     if (!url?.trim()) {
       showNotification("Configure primeiro a URL do Webhook na aba Banco Google Drive.");
       setActiveMenu("database");
@@ -747,15 +856,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     setIsSyncingAllData(true);
     try {
-      const res = await syncAllToGoogleSheets(url.trim(), {
+      const res = await saveAllToGoogleDrive(url.trim(), {
         orders: kanbanOrders,
         products,
         categories,
         customers
       });
-      showNotification(res.success ? "✅ Sincronização completa realizada! Abas 'Produtos', 'Categorias', 'Pedidos' e 'Clientes' criadas e atualizadas na planilha." : `⚠️ ${res.message}`);
+      showNotification(res.success ? "✅ Arquivos pedidos.json, catalogo.json e categorias.json salvos na sua pasta do Google Drive!" : `⚠️ ${res.message}`);
     } catch (e: any) {
-      showNotification("Erro ao sincronizar tudo: " + e.message);
+      showNotification("Erro ao sincronizar arquivos JSON com o Drive: " + e.message);
     } finally {
       setIsSyncingAllData(false);
     }
@@ -803,15 +912,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => setIsDriveModalOpen(true)}
-            className="flex items-center gap-1.5 bg-emerald-800/80 hover:bg-emerald-700 text-emerald-100 px-3 py-2 rounded-xl text-xs font-bold transition-all border border-emerald-600/50 cursor-pointer"
-            title="Configurar Google Drive & Banco de Dados"
-          >
-            <Database className="w-4 h-4 text-amber-300" />
-            <span className="hidden md:inline">Google Drive</span>
-          </button>
-
           <button
             onClick={onBackToShop}
             className="flex items-center gap-2 bg-amber-400 hover:bg-amber-300 text-emerald-950 px-3.5 py-2 rounded-xl text-xs sm:text-sm font-bold shadow-xs transition-all cursor-pointer hover:scale-102"
@@ -964,23 +1064,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   activeMenu === "categories" ? "bg-emerald-900 text-white" : "bg-white/15 text-white"
                 }`}>
                   {categories.length}
-                </span>
-              </button>
-
-              <button
-                onClick={() => setActiveMenu("customers")}
-                className={`flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-semibold transition-all cursor-pointer whitespace-nowrap text-left ${
-                  activeMenu === "customers"
-                    ? "bg-amber-400 text-emerald-950 font-bold shadow-xs"
-                    : "text-emerald-100 hover:bg-white/10 hover:text-white"
-                }`}
-              >
-                <Users className="w-4 h-4 shrink-0" />
-                <span>Clientes & Aniversários</span>
-                <span className={`ml-auto text-[10px] px-2 py-0.5 rounded-full font-bold ${
-                  activeMenu === "customers" ? "bg-emerald-900 text-white" : "bg-white/15 text-white"
-                }`}>
-                  {customers.length}
                 </span>
               </button>
 
@@ -1665,19 +1748,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           reader.onload = (evt) => {
                             try {
                               const text = evt.target?.result as string;
-                              const parsed = parseCatalogFromCSV(text);
-                              if (parsed.length > 0) {
+                              const parsedResult = parseCatalogFromJSON(text);
+                              const productList = parsedResult.products || (Array.isArray(parsedResult) ? parsedResult : []);
+                              if (productList.length > 0) {
                                 if (onBatchImportProducts) {
-                                  onBatchImportProducts(parsed, categories, false);
+                                  onBatchImportProducts(productList, parsedResult.categories.length > 0 ? parsedResult.categories : categories, false);
                                 } else {
-                                  parsed.forEach((p) => onAddProduct(p));
+                                  productList.forEach((p) => onAddProduct(p));
                                 }
-                                showNotification(`✅ ${parsed.length} produtos importados do CSV!`);
+                                showNotification(`✅ ${productList.length} produtos importados com sucesso!`);
                               } else {
-                                showNotification("⚠️ Nenhum produto reconhecido no CSV.");
+                                showNotification("⚠️ Nenhum produto reconhecido no arquivo JSON.");
                               }
                             } catch (err: any) {
-                              showNotification("Erro ao ler CSV: " + err.message);
+                              showNotification("Erro ao ler arquivo: " + err.message);
                             }
                           };
                           reader.readAsText(file, "UTF-8");
@@ -2068,28 +2152,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <button
                       onClick={handlePushCategoriesToSheets}
                       disabled={isPushingCategories}
-                      className="px-3.5 py-2 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors disabled:opacity-50"
-                      title="Salvar e sincronizar todas as categorias na aba 'Categorias' da sua Planilha Google"
+                      className="px-3.5 py-2 bg-gradient-to-r from-emerald-800 to-[#114b30] hover:from-emerald-700 hover:to-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors disabled:opacity-50"
+                      title="Salvar e sincronizar todas as categorias no arquivo 'categorias.json' no seu Google Drive"
                     >
-                      <Send className="w-3.5 h-3.5 text-amber-200" />
-                      <span>{isPushingCategories ? "Salvando na Planilha..." : "Salvar na Planilha Google"}</span>
+                      <Send className="w-3.5 h-3.5 text-amber-300" />
+                      <span>{isPushingCategories ? "Salvando no Drive..." : "Salvar no Google Drive (.json)"}</span>
                     </button>
 
                     <button
-                      onClick={handleDownloadCategoriesCSV}
+                      onClick={handleDownloadCategoriesJSON}
                       className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                      title="Exportar categorias em arquivo CSV"
+                      title="Baixar categorias.json"
                     >
                       <Download className="w-3.5 h-3.5 text-amber-800" />
-                      <span>Exportar CSV</span>
+                      <span>Baixar categorias.json</span>
                     </button>
 
-                    <label className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors" title="Importar categorias de um arquivo CSV">
+                    <label className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors" title="Importar categorias de um arquivo JSON">
                       <Upload className="w-3.5 h-3.5 text-stone-600" />
-                      <span>Importar CSV</span>
+                      <span>Importar JSON</span>
                       <input
                         type="file"
-                        accept=".csv"
+                        accept=".json"
                         className="hidden"
                         onChange={(e) => {
                           const file = e.target.files?.[0];
@@ -2098,15 +2182,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           reader.onload = (evt) => {
                             try {
                               const text = evt.target?.result as string;
-                              const parsed = parseCategoriesFromCSV(text);
+                              const parsed = parseCategoriesFromJSON(text);
                               if (parsed.length > 0) {
                                 parsed.forEach((c) => onAddCategory(c));
-                                showNotification(`✅ ${parsed.length} categorias importadas do CSV!`);
+                                showNotification(`✅ ${parsed.length} categorias importadas com sucesso!`);
                               } else {
-                                showNotification("⚠️ Nenhuma categoria reconhecida no CSV.");
+                                showNotification("⚠️ Nenhuma categoria reconhecida no arquivo JSON.");
                               }
                             } catch (err: any) {
-                              showNotification("Erro ao ler CSV: " + err.message);
+                              showNotification("Erro ao ler JSON: " + err.message);
                             }
                           };
                           reader.readAsText(file, "UTF-8");
@@ -2685,11 +2769,156 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div>
                   <h2 className="text-2xl font-serif font-extrabold text-stone-900 flex items-center gap-2">
                     <Database className="w-6 h-6 text-[#114b30]" />
-                    <span>Banco de Dados & Google Drive</span>
+                    <span>Banco de Dados & Armazenamento</span>
                   </h2>
                   <p className="text-xs sm:text-sm text-stone-500">
-                    Configure o armazenamento em nuvem via Google Drive e Google Planilhas para sincronizar pedidos do WhatsApp, clientes e relatórios automaticamente.
+                    Gerencie o armazenamento em arquivos JSON para pedidos e catálogo (independente e seguro) ou conecte com o Google Drive / Planilhas Google.
                   </p>
+                </div>
+
+                {/* PROMINENT JSON STORAGE CARDS (Pedidos e Catálogo) */}
+                <div className="bg-gradient-to-br from-emerald-950 via-[#114b30] to-emerald-900 rounded-3xl p-6 sm:p-7 text-white shadow-xl border border-emerald-800/60 space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-700/60 pb-4">
+                    <div className="space-y-1">
+                      <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-400/20 text-amber-300 rounded-full text-xs font-bold border border-amber-400/30">
+                        <span>📦 Armazenamento em Arquivos JSON</span>
+                      </div>
+                      <h3 className="text-lg sm:text-xl font-serif font-bold text-white">
+                        Armazenamento Oficial em Arquivos JSON
+                      </h3>
+                      <p className="text-xs text-emerald-200/90 max-w-2xl leading-relaxed">
+                        Guarde todos os pedidos e o catálogo de produtos em arquivos <code className="bg-black/30 px-1.5 py-0.5 rounded text-amber-300 font-mono">pedidos.json</code> e <code className="bg-black/30 px-1.5 py-0.5 rounded text-amber-300 font-mono">catalogo.json</code>. Baixe backups ou restaure dados a qualquer momento com 1 clique!
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                    {/* JSON CARD 1: PEDIDOS */}
+                    <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/15 flex flex-col justify-between space-y-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-xl bg-amber-400 text-emerald-950 flex items-center justify-center font-bold shadow-xs">
+                              <Package className="w-4 h-4" />
+                            </div>
+                            <span className="font-bold text-sm sm:text-base text-white">
+                              Arquivo de Pedidos (pedidos.json)
+                            </span>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-400 text-emerald-950">
+                            {kanbanOrders.length} {kanbanOrders.length === 1 ? "pedido" : "pedidos"}
+                          </span>
+                        </div>
+                        <p className="text-xs text-emerald-100/80 leading-relaxed">
+                          Salva todos os pedidos da esteira Kanban, dados do remetente, destinatário, endereço, data de entrega, mensagem de cartão e foto de conclusão.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2 pt-2 border-t border-white/10">
+                        <button
+                          type="button"
+                          onClick={handleDownloadOrdersJSON}
+                          className="w-full py-2.5 px-4 bg-amber-400 hover:bg-amber-300 text-emerald-950 font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01]"
+                        >
+                          <Download className="w-4 h-4 text-emerald-950" />
+                          <span>Baixar pedidos.json ({kanbanOrders.length})</span>
+                        </button>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="py-2 px-3 bg-white/15 hover:bg-white/25 text-white border border-white/20 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-center">
+                            <Upload className="w-3.5 h-3.5 text-amber-300" />
+                            <span>Mesclar .json</span>
+                            <input
+                              type="file"
+                              accept=".json,application/json"
+                              onChange={(e) => handleImportOrdersJSONFile(e, false)}
+                              className="hidden"
+                            />
+                          </label>
+
+                          <label className="py-2 px-3 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-400/30 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-center" title="Substitui todos os pedidos atuais pelos do arquivo">
+                            <RotateCcw className="w-3.5 h-3.5 text-rose-300" />
+                            <span>Restaurar .json</span>
+                            <input
+                              type="file"
+                              accept=".json,application/json"
+                              onChange={(e) => {
+                                if (window.confirm("Deseja substituir todos os pedidos atuais pelos dados do arquivo pedidos.json?")) {
+                                  handleImportOrdersJSONFile(e, true);
+                                } else {
+                                  e.target.value = "";
+                                }
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* JSON CARD 2: CATÁLOGO DE FLORES & CATEGORIAS */}
+                    <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/15 flex flex-col justify-between space-y-4">
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <div className="w-8 h-8 rounded-xl bg-emerald-400 text-emerald-950 flex items-center justify-center font-bold shadow-xs">
+                              <Flower2 className="w-4 h-4" />
+                            </div>
+                            <span className="font-bold text-sm sm:text-base text-white">
+                              Arquivo de Catálogo (catalogo.json)
+                            </span>
+                          </div>
+                          <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-emerald-400 text-emerald-950">
+                            {products.length} produtos / {categories.length} cat.
+                          </span>
+                        </div>
+                        <p className="text-xs text-emerald-100/80 leading-relaxed">
+                          Armazena o catálogo completo: todos os produtos florais, preços e referências sob consulta, fotos, descrições ricas, tags e categorias.
+                        </p>
+                      </div>
+
+                      <div className="space-y-2 pt-2 border-t border-white/10">
+                        <button
+                          type="button"
+                          onClick={handleDownloadCatalogJSON}
+                          className="w-full py-2.5 px-4 bg-emerald-400 hover:bg-emerald-300 text-emerald-950 font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01]"
+                        >
+                          <Download className="w-4 h-4 text-emerald-950" />
+                          <span>Baixar catalogo.json ({products.length} itens)</span>
+                        </button>
+
+                        <div className="grid grid-cols-2 gap-2">
+                          <label className="py-2 px-3 bg-white/15 hover:bg-white/25 text-white border border-white/20 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-center">
+                            <Upload className="w-3.5 h-3.5 text-amber-300" />
+                            <span>Mesclar .json</span>
+                            <input
+                              type="file"
+                              accept=".json,application/json"
+                              onChange={(e) => handleImportCatalogJSONFile(e, false)}
+                              className="hidden"
+                            />
+                          </label>
+
+                          <label className="py-2 px-3 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-400/30 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-center" title="Substitui o catálogo atual pelos itens do arquivo">
+                            <RotateCcw className="w-3.5 h-3.5 text-rose-300" />
+                            <span>Restaurar .json</span>
+                            <input
+                              type="file"
+                              accept=".json,application/json"
+                              onChange={(e) => {
+                                if (window.confirm("Deseja substituir o catálogo atual pelo conteúdo do arquivo catalogo.json?")) {
+                                  handleImportCatalogJSONFile(e, true);
+                                } else {
+                                  e.target.value = "";
+                                }
+                              }}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -2697,11 +2926,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4 flex flex-col justify-between">
                     <div className="space-y-3">
                       <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
-                        <FileSpreadsheet className="w-5 h-5 text-emerald-800" />
-                        <span>Exportações & Sincronização por Aba</span>
+                        <HardDrive className="w-5 h-5 text-emerald-800" />
+                        <span>Arquivos JSON no Google Drive</span>
                       </div>
                       <p className="text-xs text-stone-500 leading-relaxed">
-                        Exporte e sincronize pedidos, catálogo de flores e categorias com as abas da sua planilha Google.
+                        Todos os dados são armazenados nos arquivos <code>pedidos.json</code>, <code>catalogo.json</code> e <code>categorias.json</code> na pasta compartilhada.
                       </p>
 
                       {/* Master Sync All Button */}
@@ -2712,49 +2941,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         className="w-full py-3 px-3 bg-gradient-to-r from-emerald-800 to-[#114b30] hover:from-emerald-700 hover:to-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all hover:scale-[1.01] disabled:opacity-50"
                       >
                         <RefreshCw className={`w-4 h-4 text-amber-300 ${isSyncingAllData ? "animate-spin" : ""}`} />
-                        <span>{isSyncingAllData ? "Sincronizando e Criando Abas..." : "⚡ Sincronizar Tudo (Cria Abas & Colunas)"}</span>
+                        <span>{isSyncingAllData ? "Salvando arquivos JSON no Drive..." : "⚡ Salvar Tudo no Google Drive (.json)"}</span>
                       </button>
 
                       <div className="space-y-2 pt-1">
                         <button
                           type="button"
-                          onClick={() => downloadOfficialSpreadsheetTemplate()}
-                          className="w-full py-2 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-colors"
+                          onClick={handleDownloadOrdersJSON}
+                          className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-colors"
                         >
-                          <Download className="w-4 h-4 text-amber-300" />
-                          <span>📥 Baixar Modelo Multi-Abas Oficial (.CSV)</span>
+                          <Download className="w-4 h-4 text-emerald-700" />
+                          <span>Baixar pedidos.json ({kanbanOrders.length} pedidos)</span>
                         </button>
 
                         <div className="grid grid-cols-2 gap-2">
                           <button
                             type="button"
-                            onClick={handleDownloadCatalogCSV}
+                            onClick={handleDownloadCatalogJSON}
                             className="py-2 px-2 bg-stone-50 hover:bg-stone-100 text-stone-800 border border-stone-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                            title="Baixar Produtos em CSV"
+                            title="Baixar catalogo.json"
                           >
-                            <Download className="w-3.5 h-3.5 text-emerald-700" />
-                            <span>Produtos CSV ({products.length})</span>
+                            <Download className="w-3.5 h-3.5 text-amber-700" />
+                            <span>catalogo.json ({products.length})</span>
                           </button>
 
                           <button
                             type="button"
-                            onClick={handleDownloadCategoriesCSV}
+                            onClick={handleDownloadCategoriesJSON}
                             className="py-2 px-2 bg-stone-50 hover:bg-stone-100 text-stone-800 border border-stone-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                            title="Baixar Categorias em CSV"
+                            title="Baixar categorias.json"
                           >
-                            <Download className="w-3.5 h-3.5 text-amber-700" />
-                            <span>Categorias CSV ({categories.length})</span>
+                            <Download className="w-3.5 h-3.5 text-blue-700" />
+                            <span>categorias.json ({categories.length})</span>
                           </button>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={handleDownloadOrdersCSV}
-                          className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-colors"
-                        >
-                          <Download className="w-4 h-4 text-emerald-700" />
-                          <span>Exportar Pedidos ({kanbanOrders.length})</span>
-                        </button>
 
                         <button
                           type="button"
@@ -2762,19 +2982,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           className="w-full py-2 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
                         >
                           <Download className="w-4 h-4 text-stone-600" />
-                          <span>Exportar Clientes ({customers.length})</span>
+                          <span>Exportar Clientes CSV ({customers.length})</span>
                         </button>
                       </div>
 
-                      {/* Instructions for upload */}
-                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-[11px] text-amber-950 space-y-1.5">
-                        <strong className="block text-amber-900 font-bold">✨ Estrutura Multi-Abas Automática:</strong>
-                        <p className="leading-tight">A sincronização cria e organiza 4 abas automaticamente:</p>
+                      {/* Instructions for JSON storage */}
+                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-[11px] text-emerald-950 space-y-1.5">
+                        <strong className="block text-emerald-900 font-bold">✨ Estrutura 100% JSON na Nuvem:</strong>
+                        <p className="leading-tight">A pasta do Google Drive armazena diretamente 3 arquivos:</p>
                         <ul className="list-disc pl-4 space-y-0.5 text-[10px]">
-                          <li><strong>Produtos:</strong> Catálogo de itens, preços, estoque e fotos</li>
-                          <li><strong>Categorias:</strong> Categorias com ícones e status</li>
-                          <li><strong>Pedidos:</strong> Entregas e dados do WhatsApp</li>
-                          <li><strong>Clientes:</strong> Base de contatos e aniversários</li>
+                          <li><strong>pedidos.json:</strong> Todos os pedidos recebidos e histórico</li>
+                          <li><strong>catalogo.json:</strong> Produtos, fotos, preços e estoque</li>
+                          <li><strong>categorias.json:</strong> Categorias com ícones e status</li>
                         </ul>
                       </div>
                     </div>
@@ -2782,7 +3001,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-[11px] text-stone-600 space-y-1">
                       <span className="font-bold text-stone-800 block">Status da Sincronização:</span>
                       <p>Última sincronização: <strong>{googleDriveConfig.lastSyncedAt || "Nenhuma ainda"}</strong></p>
-                      <p>Modo Automático: <strong className={googleDriveConfig.autoSync ? "text-emerald-700" : "text-stone-500"}>{googleDriveConfig.autoSync ? "Ativo (Sincroniza ao abrir)" : "Manual"}</strong></p>
+                      <p>Modo Automático: <strong className={googleDriveConfig.autoSync ? "text-emerald-700" : "text-stone-500"}>{googleDriveConfig.autoSync ? "Ativo (Lê arquivos ao abrir)" : "Manual"}</strong></p>
                     </div>
                   </div>
 
@@ -2791,20 +3010,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="flex items-center justify-between border-b border-stone-100 pb-3">
                       <h3 className="font-serif font-bold text-stone-900 text-base flex items-center gap-2">
                         <Database className="w-5 h-5 text-[#114b30]" />
-                        <span>Configurar Conexão com Google Drive</span>
+                        <span>Configurar Conexão com Google Drive (Arquivos JSON)</span>
                       </h3>
                       <button
                         onClick={() => setIsDriveModalOpen(true)}
                         className="text-xs text-emerald-800 hover:underline font-bold cursor-pointer"
                       >
-                        Abrir Guia Passo a Passo ↗
+                        Abrir Guia & Código do Script ↗
                       </button>
                     </div>
 
                     <form onSubmit={handleSaveGoogleDriveSettings} className="space-y-4">
                       <div>
                         <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
-                          Webhook URL do Google Apps Script (Google Sheets)
+                          URL do Web App do Google Apps Script (Drive JSON) *
                         </label>
                         <input
                           type="url"
@@ -2814,27 +3033,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
                         />
                         <span className="text-[10px] text-stone-500 block mt-1">
-                          Cole o link do seu WebApp publicado no Google Apps Script para receber os pedidos automaticamente em tempo real na sua planilha.
+                          Cole a URL gerada na implantação do script para gravar e ler pedidos.json, catalogo.json e categorias.json.
                         </span>
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                           <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
-                            ID da Planilha no Google Drive (Opcional)
-                          </label>
-                          <input
-                            type="text"
-                            value={spreadsheetId}
-                            onChange={(e) => setSpreadsheetId(e.target.value)}
-                            placeholder="1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms"
-                            className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs font-mono"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
-                            Link da Pasta do Google Drive
+                            Link da Pasta do Google Drive (Opcional)
                           </label>
                           <input
                             type="url"
@@ -2842,6 +3048,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             onChange={(e) => setFolderUrl(e.target.value)}
                             placeholder="https://drive.google.com/drive/folders/..."
                             className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
+                            ID da Pasta no Google Drive (Opcional)
+                          </label>
+                          <input
+                            type="text"
+                            value={spreadsheetId}
+                            onChange={(e) => setSpreadsheetId(e.target.value)}
+                            placeholder="Ex: 1BxiMVs0XRA5nFMdKvBdBZjgm..."
+                            className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs font-mono"
                           />
                         </div>
                       </div>
@@ -2854,10 +3073,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             onChange={(e) => setAutoSync(e.target.checked)}
                             className="w-4 h-4 text-emerald-800 rounded border-stone-300 focus:ring-emerald-500 cursor-pointer"
                           />
-                          <span>Sincronização Automática: Carregar pedidos ao entrar no app e a cada 2 min</span>
+                          <span>Sincronização Automática: Ler arquivos JSON ao abrir o app e a cada 2 min</span>
                         </label>
                         <p className="text-[11px] text-emerald-800 pl-6.5">
-                          Puxa automaticamente todos os novos pedidos e alterações da sua planilha sempre que você abrir o app, sem necessidade de clicar no botão toda vez.
+                          Lê automaticamente os pedidos e produtos atualizados na sua pasta do Google Drive sempre que você abrir o app.
                         </p>
                       </div>
 
@@ -2866,10 +3085,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           type="button"
                           onClick={async () => {
                             if (!sheetWebhookUrl.trim()) {
-                              alert("Cole primeiro o link do Webhook do Google Apps Script acima.");
+                              alert("Cole primeiro a URL do Web App do Google Apps Script acima.");
                               return;
                             }
-                            const ok = await sendOrderToGoogleSheetsWebhook(sheetWebhookUrl.trim(), {
+                            const ok = await sendOrderToGoogleDrive(sheetWebhookUrl.trim(), {
                               orderNumber: "#TESTE-" + Math.floor(100 + Math.random() * 900),
                               productName: "Buquê Teste Floricultura Papoula",
                               price: 150,
@@ -2883,15 +3102,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               address: "Av. Salmeron, 100",
                               neighborhood: "Centro",
                               timeSlot: "Manhã",
-                              cardMessage: "Teste de sincronização com Google Sheets realizado com sucesso!",
+                              cardMessage: "Teste de sincronização JSON com Google Drive realizado com sucesso!",
                               paymentMethod: "PIX"
                             });
-                            showNotification(ok ? "✅ Pedido de teste enviado para a planilha! Verifique sua aba no Google Drive." : "⚠️ Verifique o link do Webhook.");
+                            showNotification(ok ? "✅ Pedido teste salvo em pedidos.json na sua pasta do Google Drive!" : "⚠️ Verifique o link do Webhook do Google Apps Script.");
                           }}
-                          className="px-4 py-2.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2"
+                          className="px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2"
                         >
-                          <Send className="w-4 h-4 text-amber-700" />
-                          <span>🚀 Enviar Pedido Teste para a Planilha Agora</span>
+                          <Send className="w-4 h-4 text-emerald-700" />
+                          <span>🚀 Enviar Pedido Teste para pedidos.json</span>
                         </button>
 
                         <button
