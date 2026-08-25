@@ -31,7 +31,7 @@ import {
 import { KanbanOrder, KanbanOrderStatus, Product } from "../types";
 import { EditOrderModal } from "./EditOrderModal";
 import { WhatsAppOrderModal } from "./WhatsAppOrderModal";
-import { exportOrdersToCSV, downloadCSV } from "../utils/googleDriveSync";
+import { ConfirmDeleteModal, DeleteTargetInfo } from "./ConfirmDeleteModal";
 import { buildWhatsAppUrl, openWhatsApp } from "../utils/whatsapp";
 
 type DateFilterType = "all" | "today" | "yesterday" | "last7days" | "this_month" | "custom";
@@ -115,6 +115,8 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
   // Modals state
   const [editingOrder, setEditingOrder] = useState<KanbanOrder | null>(null);
   const [isWhatsAppModalOpen, setIsWhatsAppModalOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTargetInfo | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Conclusion Photo Modal State
   const [concludingOrder, setConcludingOrder] = useState<KanbanOrder | null>(null);
@@ -273,12 +275,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
     return !isNaN(t) && t >= startOfToday && t <= endOfToday;
   }).length;
 
-  const handleExportFilteredCSV = () => {
-    const csv = exportOrdersToCSV(filteredOrders);
-    const date = new Date().toISOString().split("T")[0];
-    downloadCSV(`pedidos_papoula_filtrados_${date}.csv`, csv);
-  };
-
   return (
     <div className="flex-1 flex flex-col h-full space-y-4">
       
@@ -386,28 +382,6 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
               <span>+ Novo Pedido</span>
             </button>
 
-            {/* Export CSV button */}
-            <button
-              onClick={handleExportFilteredCSV}
-              className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-              title="Baixar lista filtrada em planilha Excel / CSV"
-            >
-              <Download className="w-3.5 h-3.5 text-emerald-700" />
-              <span className="hidden sm:inline">Exportar CSV</span>
-            </button>
-
-            {/* Google Drive button */}
-            {onOpenDatabaseSettings && (
-              <button
-                onClick={onOpenDatabaseSettings}
-                className="px-3 py-2 bg-stone-100 hover:bg-emerald-50 text-stone-700 hover:text-emerald-900 border border-stone-300 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                title="Configurar Google Drive & Planilhas"
-              >
-                <Database className="w-3.5 h-3.5 text-emerald-800" />
-                <span className="hidden sm:inline">Google Drive</span>
-              </button>
-            )}
-
             {/* View mode toggle (Kanban vs Table) */}
             <div className="flex items-center bg-stone-100 p-1 rounded-xl border border-stone-200 text-xs">
               <button
@@ -439,7 +413,14 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
             {/* Clear orders button */}
             {onClearOrders && orders.length > 0 && (
               <button
-                onClick={onClearOrders}
+                onClick={() => {
+                  setDeleteTarget({
+                    type: "all_orders",
+                    title: `Limpar Todos os ${orders.length} Pedidos`,
+                    subtitle: "Todos os pedidos do Kanban e do Banco de Dados serão excluídos.",
+                    warningExtra: "Esta ação apagará todo o histórico de pedidos da loja.",
+                  });
+                }}
                 className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors"
                 title="Limpar todos os pedidos"
               >
@@ -994,6 +975,30 @@ export const KanbanBoard: React.FC<KanbanBoardProps> = ({
           </div>
         </div>
       )}
+
+      {/* Confirm Permanent Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTarget}
+        target={deleteTarget}
+        isProcessing={isDeleting}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setIsDeleting(true);
+          try {
+            if (deleteTarget.type === "order" && deleteTarget.id && onDeleteOrder) {
+              await onDeleteOrder(deleteTarget.id);
+            } else if (deleteTarget.type === "all_orders" && onClearOrders) {
+              await onClearOrders();
+            }
+          } catch (e) {
+            console.error("Erro ao deletar:", e);
+          } finally {
+            setIsDeleting(false);
+            setDeleteTarget(null);
+          }
+        }}
+      />
 
     </div>
   );

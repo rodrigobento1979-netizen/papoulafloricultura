@@ -82,6 +82,8 @@ import {
 } from "../utils/googleDriveSync";
 import { calculateStarRating, getStoreBusinessHours, DEFAULT_STORE_CONFIG } from "../utils/businessHours";
 import { buildWhatsAppUrl } from "../utils/whatsapp";
+import { ConfirmDeleteModal, DeleteTargetInfo } from "./ConfirmDeleteModal";
+import { exportDatabaseToExcel } from "../utils/excelExport";
 
 interface AdminDashboardProps {
   products: Product[];
@@ -245,6 +247,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [customerSearch, setCustomerSearch] = useState("");
   const [customerFilterTab, setCustomerFilterTab] = useState<"all" | "birthdays" | "month_birthdays" | "with_orders">("all");
   const [isAddCustomerOpen, setIsAddCustomerOpen] = useState(false);
+  
+  // Permanent Delete Confirmation Modal State
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTargetInfo | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
   
   // Customer Edit Modal State
   const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
@@ -1242,23 +1248,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <span>{isAddCustomerOpen ? "Fechar Formulário" : "+ Novo Cliente"}</span>
                     </button>
 
-                    <button
-                      onClick={handleDownloadCustomersCSV}
-                      className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                      title="Exportar base de clientes para CSV"
-                    >
-                      <Download className="w-4 h-4 text-emerald-700" />
-                      <span>Exportar CSV</span>
-                    </button>
-
                     {onClearCustomers && customers.length > 0 && (
                       <button
-                        onClick={onClearCustomers}
+                        onClick={() => {
+                          setDeleteTarget({
+                            type: "all_customers",
+                            title: `Excluir Todos os ${customers.length} Clientes`,
+                            subtitle: "Todos os clientes cadastrados serão excluídos permanentemente da base de dados.",
+                            warningExtra: "Esta ação apagará todos os contatos e datas de aniversários.",
+                          });
+                        }}
                         className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
                         title="Limpar todos os clientes da lista"
                       >
                         <Trash2 className="w-4 h-4 text-rose-600" />
-                        <span>Limpar Clientes</span>
+                        <span>Limpar Clientes ({customers.length})</span>
                       </button>
                     )}
                   </div>
@@ -1610,10 +1614,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                                     <button
                                       onClick={() => {
-                                        if (window.confirm(`Excluir permanentemente o cliente "${cust.fullName}"?`)) {
-                                          onDeleteCustomer(cust.id);
-                                          showNotification(`Cliente "${cust.fullName}" removido com sucesso.`);
-                                        }
+                                        setDeleteTarget({
+                                          type: "customer",
+                                          id: cust.id,
+                                          title: `Excluir Cliente "${cust.fullName}"`,
+                                          subtitle: "O cadastro do cliente e suas anotações serão excluídos permanentemente da base de dados.",
+                                        });
                                       }}
                                       className="p-1.5 text-stone-400 hover:text-rose-600 hover:bg-rose-50 border border-stone-200 rounded-lg transition-colors cursor-pointer"
                                       title="Excluir cliente"
@@ -1740,25 +1746,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={handlePushCatalogToSheets}
-                      disabled={isPushingCatalog}
-                      className="px-3.5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors disabled:opacity-50"
-                      title="Salvar e sincronizar todo o catálogo na aba 'Catalogo' da sua Planilha Google"
-                    >
-                      <Send className="w-3.5 h-3.5 text-amber-300" />
-                      <span>{isPushingCatalog ? "Salvando na Planilha..." : "Salvar na Planilha Google"}</span>
-                    </button>
-
-                    <button
-                      onClick={handleDownloadCatalogCSV}
-                      className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                      title="Exportar catálogo em arquivo CSV"
-                    >
-                      <Download className="w-3.5 h-3.5 text-emerald-700" />
-                      <span>Exportar CSV</span>
-                    </button>
-
                     <label className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors" title="Importar produtos de um arquivo CSV">
                       <Upload className="w-3.5 h-3.5 text-stone-600" />
                       <span>Importar CSV</span>
@@ -1797,12 +1784,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                     {onClearProducts && products.length > 0 && (
                       <button
-                        onClick={onClearProducts}
+                        onClick={() => {
+                          setDeleteTarget({
+                            type: "all_products",
+                            title: `Excluir Todos os ${products.length} Produtos`,
+                            subtitle: "Todos os produtos e fotos do catálogo serão excluídos permanentemente.",
+                            warningExtra: "Esta ação apagará toda a vitrine da floricultura.",
+                          });
+                        }}
                         className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
                         title="Limpar todos os produtos do catálogo"
                       >
                         <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                        <span>Limpar ({products.length})</span>
+                        <span>Limpar Catálogo ({products.length})</span>
                       </button>
                     )}
                   </div>
@@ -2141,10 +2135,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                               <button
                                 onClick={() => {
-                                  if (window.confirm(`Excluir "${prod.name}"?`)) {
-                                    onDeleteProduct(prod.id);
-                                    showNotification(`Produto "${prod.name}" excluído.`);
-                                  }
+                                  setDeleteTarget({
+                                    type: "product",
+                                    id: prod.id,
+                                    title: `Excluir "${prod.name}"`,
+                                    subtitle: "O produto e sua foto serão removidos permanentemente do catálogo e do banco de dados.",
+                                  });
                                 }}
                                 className="p-2 text-stone-400 hover:text-rose-600 rounded-lg cursor-pointer"
                               >
@@ -2174,25 +2170,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </p>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      onClick={handlePushCategoriesToSheets}
-                      disabled={isPushingCategories}
-                      className="px-3.5 py-2 bg-gradient-to-r from-emerald-800 to-[#114b30] hover:from-emerald-700 hover:to-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs transition-colors disabled:opacity-50"
-                      title="Salvar e sincronizar todas as categorias no arquivo 'categorias.json' no seu Google Drive"
-                    >
-                      <Send className="w-3.5 h-3.5 text-amber-300" />
-                      <span>{isPushingCategories ? "Salvando no Drive..." : "Salvar no Google Drive (.json)"}</span>
-                    </button>
-
-                    <button
-                      onClick={handleDownloadCategoriesJSON}
-                      className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs transition-colors"
-                      title="Baixar categorias.json"
-                    >
-                      <Download className="w-3.5 h-3.5 text-amber-800" />
-                      <span>Baixar categorias.json</span>
-                    </button>
-
                     <label className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors" title="Importar categorias de um arquivo JSON">
                       <Upload className="w-3.5 h-3.5 text-stone-600" />
                       <span>Importar JSON</span>
@@ -2226,7 +2203,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                     {onClearCategories && categories.length > 0 && (
                       <button
-                        onClick={onClearCategories}
+                        onClick={() => {
+                          setDeleteTarget({
+                            type: "all_categories",
+                            title: `Excluir Todas as ${categories.length} Categorias`,
+                            subtitle: "Todas as categorias cadastradas serão excluídas permanentemente do catálogo.",
+                            warningExtra: "Os produtos vinculados perderão a classificação por categoria.",
+                          });
+                        }}
                         className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer self-start sm:self-auto transition-colors"
                         title="Limpar todas as categorias"
                       >
@@ -2319,10 +2303,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </div>
                         <button
                           onClick={() => {
-                            if (window.confirm(`Excluir categoria "${cat.name}"?`)) {
-                              onDeleteCategory(cat.id);
-                              showNotification(`Categoria "${cat.name}" excluída.`);
-                            }
+                            setDeleteTarget({
+                              type: "category",
+                              id: cat.id,
+                              title: `Excluir Categoria "${cat.name}"`,
+                              subtitle: "A categoria será removida permanentemente do catálogo de flores.",
+                            });
                           }}
                           className="p-1.5 text-stone-400 hover:text-rose-600 rounded cursor-pointer"
                         >
@@ -2853,208 +2839,82 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 </div>
 
-                {/* BACKUPS & EXPORTAÇÃO JSON / CSV */}
+                {/* UNIFIED EXCEL DATABASE EXPORT */}
                 <div className="bg-white rounded-3xl p-6 sm:p-7 text-stone-800 shadow-md border border-stone-200 space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-200 pb-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-200 pb-4">
                     <div className="space-y-1">
-                      <div className="inline-flex items-center gap-2 px-3 py-1 bg-stone-100 text-stone-700 rounded-full text-xs font-bold border border-stone-200">
-                        <span>💾 Backups & Exportações de Segurança</span>
+                      <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-50 text-emerald-800 rounded-full text-xs font-bold border border-emerald-200">
+                        <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-700" />
+                        <span>Exportação Unificada do Banco de Dados</span>
                       </div>
                       <h3 className="text-lg sm:text-xl font-serif font-bold text-stone-900">
-                        Cópias de Segurança e Exportações
+                        Exportar Banco de Dados em Excel (.xlsx)
                       </h3>
                       <p className="text-xs text-stone-500 max-w-2xl leading-relaxed">
-                        Baixe arquivos de backup a qualquer momento para manter cópias no seu computador ou restaurar dados se necessário.
+                        Gera um arquivo Excel completo com todas as informações organizadas em <strong>4 abas separadas</strong>: Pedidos, Catálogo de Flores, Categorias e Clientes com Aniversários.
                       </p>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {/* DOWNLOAD ORDERS JSON */}
-                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 flex flex-col justify-between space-y-3">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <Package className="w-4 h-4 text-amber-600" />
-                          <span className="font-bold text-xs sm:text-sm text-stone-900">Pedidos (.json)</span>
-                        </div>
-                        <p className="text-[11px] text-stone-500">
-                          {kanbanOrders.length} {kanbanOrders.length === 1 ? "pedido registrado" : "pedidos registrados"}
-                        </p>
-                      </div>
+                    <div className="shrink-0">
                       <button
                         type="button"
-                        onClick={handleDownloadOrdersJSON}
-                        className="w-full py-2.5 px-3 bg-amber-400 hover:bg-amber-300 text-emerald-950 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Baixar pedidos.json</span>
-                      </button>
-                    </div>
-
-                    {/* DOWNLOAD CATALOG JSON */}
-                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 flex flex-col justify-between space-y-3">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <Flower2 className="w-4 h-4 text-emerald-700" />
-                          <span className="font-bold text-xs sm:text-sm text-stone-900">Catálogo (.json)</span>
-                        </div>
-                        <p className="text-[11px] text-stone-500">
-                          {products.length} flores com fotos e preços
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleDownloadCatalogJSON}
-                        className="w-full py-2.5 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Baixar catalogo.json</span>
-                      </button>
-                    </div>
-
-                    {/* DOWNLOAD CATEGORIES JSON */}
-                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 flex flex-col justify-between space-y-3">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <FolderTree className="w-4 h-4 text-blue-700" />
-                          <span className="font-bold text-xs sm:text-sm text-stone-900">Categorias (.json)</span>
-                        </div>
-                        <p className="text-[11px] text-stone-500">
-                          {categories.length} categorias cadastradas
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleDownloadCategoriesJSON}
-                        className="w-full py-2.5 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs border border-stone-300 rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Baixar categorias.json</span>
-                      </button>
-                    </div>
-
-                    {/* DOWNLOAD CUSTOMERS CSV */}
-                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 flex flex-col justify-between space-y-3">
-                      <div>
-                        <div className="flex items-center gap-2 mb-1">
-                          <Users className="w-4 h-4 text-purple-700" />
-                          <span className="font-bold text-xs sm:text-sm text-stone-900">Clientes (.csv)</span>
-                        </div>
-                        <p className="text-[11px] text-stone-500">
-                          {customers.length} contatos com telefones
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleDownloadCustomersCSV}
-                        className="w-full py-2.5 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs border border-stone-300 rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Exportar Clientes CSV</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                {/* MANUTENÇÃO & LIMPEZA DE DADOS PARA USO REAL */}
-                <div className="bg-white p-6 sm:p-7 rounded-3xl border border-stone-200 shadow-md space-y-4">
-                  <div className="border-b border-stone-100 pb-3 flex items-center justify-between">
-                    <div>
-                      <h3 className="font-serif font-bold text-stone-900 text-lg flex items-center gap-2">
-                        <Trash2 className="w-5 h-5 text-rose-600" />
-                        <span>Manutenção & Preparação para Uso Real</span>
-                      </h3>
-                      <p className="text-xs text-stone-500">
-                        Ferramentas para zerar pedidos de teste antes de abrir para o público ou restaurar o catálogo oficial.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
-                    {/* LIMPAR PEDIDOS */}
-                    <div className="p-4 bg-rose-50/50 rounded-2xl border border-rose-200 flex flex-col justify-between space-y-3">
-                      <div>
-                        <span className="font-bold text-xs text-rose-950 block">Zerar Pedidos de Teste</span>
-                        <p className="text-[11px] text-rose-800/80 mt-0.5">
-                          Apaga todos os {kanbanOrders.length} pedidos do Kanban e do Firestore para começar as vendas do zero.
-                        </p>
-                      </div>
-                      <button
-                        onClick={onClearOrders || (() => {})}
-                        disabled={kanbanOrders.length === 0}
-                        className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                          kanbanOrders.length > 0
-                            ? "bg-rose-600 hover:bg-rose-700 text-white shadow-xs"
-                            : "bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed"
-                        }`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Limpar Pedidos ({kanbanOrders.length})</span>
-                      </button>
-                    </div>
-
-                    {/* LIMPAR CLIENTES */}
-                    <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 flex flex-col justify-between space-y-3">
-                      <div>
-                        <span className="font-bold text-xs text-stone-900 block">Zerar Lista de Clientes</span>
-                        <p className="text-[11px] text-stone-500 mt-0.5">
-                          Apaga todos os {customers.length} clientes da base de contatos.
-                        </p>
-                      </div>
-                      <button
-                        onClick={onClearCustomers || (() => {})}
-                        disabled={customers.length === 0}
-                        className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                          customers.length > 0
-                            ? "bg-stone-200 hover:bg-stone-300 text-stone-800 border border-stone-300"
-                            : "bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed"
-                        }`}
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Limpar Clientes ({customers.length})</span>
-                      </button>
-                    </div>
-
-                    {/* ZERAR CATÁLOGO */}
-                    <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 flex flex-col justify-between space-y-3">
-                      <div>
-                        <span className="font-bold text-xs text-stone-900 block">Zerar Catálogo & Categorias</span>
-                        <p className="text-[11px] text-stone-500 mt-0.5">
-                          Zera todos os produtos ({products.length}) e categorias ({categories.length}) para cadastrar do zero.
-                        </p>
-                      </div>
-                      <button
                         onClick={() => {
-                          if (onClearProducts) onClearProducts();
-                          if (onClearCategories) onClearCategories();
+                          exportDatabaseToExcel({
+                            orders: kanbanOrders,
+                            products,
+                            categories,
+                            customers,
+                          });
+                          showNotification("📊 Planilha Excel gerada e baixada com sucesso (4 abas completas)!");
                         }}
-                        disabled={products.length === 0 && categories.length === 0}
-                        className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
-                          products.length > 0 || categories.length > 0
-                            ? "bg-stone-200 hover:bg-stone-300 text-stone-800 border border-stone-300"
-                            : "bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed"
-                        }`}
+                        className="w-full sm:w-auto py-3 px-6 bg-[#114b30] hover:bg-[#0c3924] text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow-md hover:scale-105 transition-all cursor-pointer flex items-center justify-center gap-2"
                       >
-                        <Trash2 className="w-3.5 h-3.5" />
-                        <span>Zerar Catálogo ({products.length})</span>
+                        <FileSpreadsheet className="w-4 h-4 text-emerald-300" />
+                        <span>Exportar Tudo em Excel (.xlsx)</span>
                       </button>
                     </div>
+                  </div>
 
-                    {/* RESTAURAR PDF */}
-                    <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 flex flex-col justify-between space-y-3">
-                      <div>
-                        <span className="font-bold text-xs text-emerald-950 block">Restaurar Catálogo Oficial (PDF)</span>
-                        <p className="text-[11px] text-emerald-800/80 mt-0.5">
-                          Recarrega os 28 produtos e categorias oficiais da Floricultura Papoula.
-                        </p>
+                  {/* Summary of Excel Tabs */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
+                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200/80">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="w-6 h-6 rounded-lg bg-amber-100 text-amber-800 text-xs font-bold flex items-center justify-center">1</span>
+                        <span className="font-bold text-xs sm:text-sm text-stone-900">Aba Pedidos</span>
                       </div>
-                      <button
-                        onClick={onResetToDefaults}
-                        className="w-full py-2.5 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
-                      >
-                        <RotateCcw className="w-3.5 h-3.5" />
-                        <span>Carregar 28 Itens do PDF</span>
-                      </button>
+                      <p className="text-[11px] text-stone-500">
+                        {kanbanOrders.length} {kanbanOrders.length === 1 ? "pedido com status, valores e endereços" : "pedidos com status, valores e endereços"}
+                      </p>
+                    </div>
+
+                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200/80">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="w-6 h-6 rounded-lg bg-emerald-100 text-emerald-800 text-xs font-bold flex items-center justify-center">2</span>
+                        <span className="font-bold text-xs sm:text-sm text-stone-900">Aba Catálogo</span>
+                      </div>
+                      <p className="text-[11px] text-stone-500">
+                        {products.length} flores, buquês, preços e disponibilidade
+                      </p>
+                    </div>
+
+                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200/80">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="w-6 h-6 rounded-lg bg-blue-100 text-blue-800 text-xs font-bold flex items-center justify-center">3</span>
+                        <span className="font-bold text-xs sm:text-sm text-stone-900">Aba Categorias</span>
+                      </div>
+                      <p className="text-[11px] text-stone-500">
+                        {categories.length} categorias com ícones e descrições
+                      </p>
+                    </div>
+
+                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200/80">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span className="w-6 h-6 rounded-lg bg-purple-100 text-purple-800 text-xs font-bold flex items-center justify-center">4</span>
+                        <span className="font-bold text-xs sm:text-sm text-stone-900">Aba Clientes</span>
+                      </div>
+                      <p className="text-[11px] text-stone-500">
+                        {customers.length} contatos com telefones e aniversários
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -3369,6 +3229,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           setTimeout(() => setFeedbackMessage(""), 5000);
         }}
         currentProductsCount={products.length}
+      />
+
+      {/* Reusable Permanent Deletion Confirmation Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTarget}
+        target={deleteTarget}
+        isDeleting={isDeleting}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setIsDeleting(true);
+          try {
+            if (deleteTarget.type === "customer" && deleteTarget.id) {
+              await onDeleteCustomer(deleteTarget.id);
+              showNotification("Cliente removido com sucesso.");
+            } else if (deleteTarget.type === "all_customers" && onClearCustomers) {
+              await onClearCustomers();
+              showNotification("Todos os clientes foram removidos da base.");
+            } else if (deleteTarget.type === "product" && deleteTarget.id) {
+              await onDeleteProduct(deleteTarget.id);
+              showNotification("Produto excluído do catálogo.");
+            } else if (deleteTarget.type === "all_products" && onClearProducts) {
+              await onClearProducts();
+              showNotification("Catálogo de produtos zerado com sucesso.");
+            } else if (deleteTarget.type === "category" && deleteTarget.id) {
+              await onDeleteCategory(deleteTarget.id);
+              showNotification("Categoria excluída com sucesso.");
+            } else if (deleteTarget.type === "all_categories" && onClearCategories) {
+              await onClearCategories();
+              showNotification("Todas as categorias foram removidas.");
+            } else if (deleteTarget.type === "order" && deleteTarget.id && onDeleteKanbanOrder) {
+              await onDeleteKanbanOrder(deleteTarget.id);
+              showNotification("Pedido removido com sucesso.");
+            } else if (deleteTarget.type === "all_orders" && onClearOrders) {
+              await onClearOrders();
+              showNotification("Todos os pedidos foram limpos com sucesso.");
+            }
+          } catch (err: any) {
+            console.error("Erro na exclusão:", err);
+            showNotification("Erro ao excluir: " + (err.message || "Erro desconhecido"));
+          } finally {
+            setIsDeleting(false);
+            setDeleteTarget(null);
+          }
+        }}
       />
     </div>
   );

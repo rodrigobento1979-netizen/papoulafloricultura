@@ -1,29 +1,18 @@
-import React, { useState, useRef } from "react";
+import React, { useState } from "react";
 import { 
   ShoppingBag, 
   Calendar, 
   Search, 
   X, 
   DollarSign, 
-  Download, 
-  Database, 
   Edit, 
   Trash2,
   CheckCircle2,
-  RefreshCw,
-  Upload,
   AlertCircle
 } from "lucide-react";
 import { KanbanOrder, KanbanOrderStatus, Product, GoogleDriveConfig } from "../types";
 import { EditOrderModal } from "./EditOrderModal";
-import { 
-  exportOrdersToCSV, 
-  downloadCSV, 
-  fetchStoreDataFromGoogleDrive, 
-  parseOrdersFromJSON, 
-  downloadOrdersJSON,
-  mergeOrders 
-} from "../utils/googleDriveSync";
+import { ConfirmDeleteModal, DeleteTargetInfo } from "./ConfirmDeleteModal";
 import { buildWhatsAppUrl } from "../utils/whatsapp";
 
 type DateFilterType = "all" | "today" | "yesterday" | "last7days" | "this_month" | "custom";
@@ -108,91 +97,8 @@ export const OrdersList: React.FC<OrdersListProps> = ({
 
   // Modals state
   const [editingOrder, setEditingOrder] = useState<KanbanOrder | null>(null);
-
-  // Sync state
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [syncToast, setSyncToast] = useState<{
-    type: "success" | "error" | "info";
-    message: string;
-  } | null>(null);
-
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const showSyncToast = (type: "success" | "error" | "info", message: string) => {
-    setSyncToast({ type, message });
-    setTimeout(() => setSyncToast(null), 5000);
-  };
-
-  const handleSyncFromSheets = async () => {
-    const webhookUrl = googleDriveConfig?.driveWebhookUrl || googleDriveConfig?.sheetWebhookUrl || "";
-    const folderUrl = googleDriveConfig?.folderUrl || "";
-    const folderId = googleDriveConfig?.folderId || "";
-
-    const target = webhookUrl || folderUrl || folderId;
-
-    if (!target || !target.trim()) {
-      showSyncToast("info", "Abra as configurações do Google Drive para informar a URL do Webhook do Google Apps Script.");
-      if (onOpenDatabaseSettings) onOpenDatabaseSettings();
-      return;
-    }
-
-    setIsSyncing(true);
-    try {
-      const result = await fetchStoreDataFromGoogleDrive(webhookUrl, folderUrl, folderId);
-      if (result.success && result.orders.length > 0) {
-        if (onBatchImportOrders) {
-          const { merged, addedCount, updatedCount } = mergeOrders(orders, result.orders);
-          onBatchImportOrders(merged);
-          showSyncToast(
-            "success",
-            `✅ Google Drive sincronizado! ${result.orders.length} pedidos em 'pedidos.json' (${addedCount} novos, ${updatedCount} atualizados).`
-          );
-        } else {
-          showSyncToast("success", `✅ ${result.orders.length} pedidos encontrados no arquivo pedidos.json.`);
-        }
-      } else if (result.success && result.orders.length === 0) {
-        showSyncToast("info", "Google Drive conectado com sucesso, mas o arquivo pedidos.json está vazio.");
-      } else {
-        showSyncToast(
-          "error",
-          result.message || "Não foi possível carregar os pedidos. Verifique se o Web App do Google Apps Script está ativo."
-        );
-      }
-    } catch (err: any) {
-      showSyncToast("error", err.message || "Erro de conexão ao buscar pedidos no Google Drive.");
-    } finally {
-      setIsSyncing(false);
-    }
-  };
-
-  const handleJSONUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (evt) => {
-      try {
-        const text = evt.target?.result as string;
-        const parsed = parseOrdersFromJSON(text);
-        if (parsed.length > 0) {
-          if (onBatchImportOrders) {
-            const { merged, addedCount, updatedCount } = mergeOrders(orders, parsed);
-            onBatchImportOrders(merged);
-            showSyncToast(
-              "success",
-              `✅ Arquivo pedidos.json importado! ${parsed.length} pedidos lidos (${addedCount} novos, ${updatedCount} atualizados).`
-            );
-          }
-        } else {
-          showSyncToast("error", "Nenhum pedido válido encontrado no arquivo JSON.");
-        }
-      } catch (err: any) {
-        showSyncToast("error", "Erro ao processar arquivo JSON: " + err.message);
-      }
-    };
-    reader.readAsText(file, "UTF-8");
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  };
+  const [deleteTarget, setDeleteTarget] = useState<DeleteTargetInfo | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Date filter evaluation
   const isOrderMatchingDate = (order: KanbanOrder): boolean => {
@@ -281,10 +187,6 @@ export const OrdersList: React.FC<OrdersListProps> = ({
     return acc + tot;
   }, 0);
 
-  const handleExportCSV = () => {
-    downloadOrdersJSON(filteredOrders);
-  };
-
   return (
     <div className="flex-1 flex flex-col h-full space-y-4">
       
@@ -359,36 +261,6 @@ export const OrdersList: React.FC<OrdersListProps> = ({
         </div>
       </div>
 
-      {/* SYNC NOTIFICATION TOAST */}
-      {syncToast && (
-        <div
-          className={`p-3.5 rounded-2xl border text-xs flex items-center justify-between shadow-sm animate-fadeIn ${
-            syncToast.type === "success"
-              ? "bg-emerald-50 border-emerald-200 text-emerald-950"
-              : syncToast.type === "error"
-              ? "bg-rose-50 border-rose-200 text-rose-900"
-              : "bg-blue-50 border-blue-200 text-blue-950"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {syncToast.type === "success" ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
-            ) : syncToast.type === "error" ? (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            ) : (
-              <RefreshCw className="w-4 h-4 text-blue-600 shrink-0" />
-            )}
-            <span className="font-medium">{syncToast.message}</span>
-          </div>
-          <button
-            onClick={() => setSyncToast(null)}
-            className="p-1 hover:bg-black/5 rounded-lg text-stone-500 cursor-pointer"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
-
       {/* FILTER CONTROLS & COMPACT ACTIONS BAR */}
       <div className="bg-white rounded-2xl p-4 border border-stone-200 shadow-xs space-y-3.5">
         
@@ -411,72 +283,25 @@ export const OrdersList: React.FC<OrdersListProps> = ({
             </div>
           </div>
 
-          {/* 1º Requirement: Sincronização, Importar, Exportar e Banco de Dados em Apenas Ícones */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            {/* Sync from Google Sheets Icon Button */}
-            <button
-              type="button"
-              onClick={handleSyncFromSheets}
-              disabled={isSyncing}
-              className="p-2.5 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl shadow-2xs transition-all cursor-pointer hover:scale-105 disabled:opacity-60 flex items-center justify-center"
-              title="Ler pedidos.json do Google Drive"
-              aria-label="Ler pedidos do Google Drive"
-            >
-              <RefreshCw className={`w-4 h-4 ${isSyncing ? "animate-spin text-amber-300" : "text-amber-300"}`} />
-            </button>
-
-            {/* Import JSON Icon Button */}
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleJSONUpload}
-              className="hidden"
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="p-2.5 bg-stone-100 hover:bg-emerald-50 text-stone-800 hover:text-emerald-950 border border-stone-300 rounded-xl transition-all cursor-pointer hover:scale-105 flex items-center justify-center"
-              title="Importar pedidos.json do Computador/Celular"
-              aria-label="Importar pedidos.json"
-            >
-              <Upload className="w-4 h-4 text-emerald-800" />
-            </button>
-
-            {/* Export JSON Icon Button */}
-            <button
-              type="button"
-              onClick={handleExportCSV}
-              className="p-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl transition-all cursor-pointer hover:scale-105 flex items-center justify-center"
-              title="Baixar pedidos.json"
-              aria-label="Baixar pedidos.json"
-            >
-              <Download className="w-4 h-4 text-emerald-700" />
-            </button>
-
-            {/* Google Drive / Database Icon Button */}
-            {onOpenDatabaseSettings && (
-              <button
-                type="button"
-                onClick={onOpenDatabaseSettings}
-                className="p-2.5 bg-stone-100 hover:bg-emerald-50 text-stone-700 hover:text-emerald-900 border border-stone-300 rounded-xl transition-all cursor-pointer hover:scale-105 flex items-center justify-center"
-                title="Configurar Google Drive & Banco de Dados"
-                aria-label="Google Drive & Banco de Dados"
-              >
-                <Database className="w-4 h-4 text-emerald-800" />
-              </button>
-            )}
-
-            {/* Clear orders Icon button */}
+          {/* Clean Right Actions */}
+          <div className="flex items-center gap-2">
             {onClearOrders && orders.length > 0 && (
               <button
                 type="button"
-                onClick={onClearOrders}
-                className="p-2.5 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl transition-colors cursor-pointer flex items-center justify-center"
+                onClick={() => {
+                  setDeleteTarget({
+                    type: "all_orders",
+                    title: `Limpar Todos os ${orders.length} Pedidos`,
+                    subtitle: "Todos os pedidos listados e armazenados no banco de dados serão excluídos.",
+                    warningExtra: "Esta ação apagará todo o histórico de pedidos da loja.",
+                  });
+                }}
+                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 rounded-xl transition-colors cursor-pointer text-xs font-bold flex items-center gap-1.5"
                 title={`Limpar todos os ${orders.length} pedidos`}
                 aria-label="Limpar Pedidos"
               >
-                <Trash2 className="w-4 h-4 text-rose-600" />
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>Limpar Histórico</span>
               </button>
             )}
           </div>
@@ -621,46 +446,14 @@ export const OrdersList: React.FC<OrdersListProps> = ({
                       <div>
                         <p className="text-sm font-bold text-stone-800">
                           {orders.length === 0
-                            ? "Nenhum pedido carregado no sistema ainda."
-                            : "Nenhum pedido encontrado para o período selecionado."}
+                            ? "Nenhum pedido cadastrado no momento."
+                            : "Nenhum pedido encontrado para o período ou filtro selecionado."}
                         </p>
                         <p className="text-xs text-stone-500 mt-1">
                           {orders.length === 0
-                            ? "Sincronize com sua planilha do Google Drive ou importe um arquivo CSV para carregar seus pedidos."
+                            ? "Novos pedidos realizados no cardápio de flores aparecerão aqui e no Kanban automaticamente."
                             : "Tente selecionar outro filtro de data como 'Todas as Datas' ou 'Este Mês'."}
                         </p>
-                      </div>
-
-                      <div className="flex items-center justify-center gap-2 pt-2 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={handleSyncFromSheets}
-                          disabled={isSyncing}
-                          className="px-3.5 py-2 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all cursor-pointer disabled:opacity-60"
-                        >
-                          <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin text-amber-300" : "text-amber-300"}`} />
-                          <span>{isSyncing ? "Buscando..." : "Sincronizar com a Planilha"}</span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => fileInputRef.current?.click()}
-                          className="px-3 py-2 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                        >
-                          <Upload className="w-3.5 h-3.5 text-emerald-800" />
-                          <span>Importar CSV</span>
-                        </button>
-
-                        {onOpenDatabaseSettings && (
-                          <button
-                            type="button"
-                            onClick={onOpenDatabaseSettings}
-                            className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-200 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-all cursor-pointer"
-                          >
-                            <Database className="w-3.5 h-3.5 text-emerald-800" />
-                            <span>Configurações</span>
-                          </button>
-                        )}
                       </div>
                     </div>
                   </td>
@@ -749,9 +542,17 @@ export const OrdersList: React.FC<OrdersListProps> = ({
                         {onDeleteOrder && (
                           <button
                             type="button"
-                            onClick={() => onDeleteOrder(order.id)}
+                            onClick={() => {
+                              const rawNum = (order.orderNumber || order.id || "").toString().replace(/^#/, "");
+                              setDeleteTarget({
+                                type: "order",
+                                id: order.id,
+                                title: `Pedido #${rawNum}`,
+                                subtitle: `Cliente: ${order.customerName || "Não informado"} • Total: R$ ${(order.totalPrice || 0).toFixed(2)} • Item: ${order.productName || "Flores"}`,
+                              });
+                            }}
                             className="p-1.5 text-rose-600 hover:text-rose-800 hover:bg-rose-50 border border-transparent hover:border-rose-200 rounded-lg transition-colors cursor-pointer inline-flex items-center justify-center"
-                            title="Remover pedido"
+                            title="Remover pedido permanentemente"
                             aria-label="Remover Pedido"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -793,6 +594,30 @@ export const OrdersList: React.FC<OrdersListProps> = ({
         onClose={() => setEditingOrder(null)}
         onSaveOrder={onUpdateOrder}
         products={products}
+      />
+
+      {/* Confirm Permanent Delete Modal */}
+      <ConfirmDeleteModal
+        isOpen={!!deleteTarget}
+        target={deleteTarget}
+        isProcessing={isDeleting}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={async () => {
+          if (!deleteTarget) return;
+          setIsDeleting(true);
+          try {
+            if (deleteTarget.type === "order" && deleteTarget.id && onDeleteOrder) {
+              await onDeleteOrder(deleteTarget.id);
+            } else if (deleteTarget.type === "all_orders" && onClearOrders) {
+              await onClearOrders();
+            }
+          } catch (e) {
+            console.error("Erro ao deletar:", e);
+          } finally {
+            setIsDeleting(false);
+            setDeleteTarget(null);
+          }
+        }}
       />
 
     </div>
