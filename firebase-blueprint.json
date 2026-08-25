@@ -1,0 +1,90 @@
+{
+  "entities": {
+    "orders": {
+      "title": "Order",
+      "description": "Customer floral order placed via WhatsApp or Kanban dashboard",
+      "type": "object",
+      "properties": {
+        "orderNumber": { "type": "string" },
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "customerBirthDate": { "type": "string" },
+        "productName": { "type": "string" },
+        "category": { "type": "string" },
+        "referencePrice": { "type": "number" },
+        "freightFee": { "type": "number" },
+        "totalPrice": { "type": "number" },
+        "deliveryCity": { "type": "string" },
+        "deliveryAddress": { "type": "string" },
+        "deliveryDate": { "type": "string" },
+        "deliveryTimeSlot": { "type": "string" },
+        "cardMessage": { "type": "string" },
+        "paymentMethod": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "photoProofUrl": { "type": "string" }
+      },
+      "required": ["orderNumber", "customerName", "productName", "totalPrice", "status"]
+    },
+    "products": {
+      "title": "Product",
+      "description": "Floral arrangement, bouquet or gift item in catalog",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "originalPrice": { "type": "number" },
+        "category": { "type": "string" },
+        "image": { "type": "string" },
+        "rating": { "type": "number" },
+        "reviewsCount": { "type": "number" },
+        "featured": { "type": "boolean" },
+        "isPromotion": { "type": "boolean" },
+        "inStock": { "type": "boolean" }
+      },
+      "required": ["id", "name", "price", "category"]
+    },
+    "categories": {
+      "title": "Category",
+      "description": "Category for floral arrangements",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "icon": { "type": "string" },
+        "count": { "type": "number" },
+        "description": { "type": "string" }
+      },
+      "required": ["id", "name"]
+    },
+    "customers": {
+      "title": "Customer",
+      "description": "Customer contact and purchase summary",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "birthDate": { "type": "string" },
+        "totalOrders": { "type": "number" },
+        "totalSpent": { "type": "number" },
+        "lastOrderDate": { "type": "string" }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "store_config": {
+      "title": "StoreConfig",
+      "description": "Store configuration and operational settings",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "storeName": { "type": "string" },
+        "phone": { "type": "string" },
+        "deliveryFeePirapora": { "type": "number" },
+        "deliveryFeeBuritizeiro": { "type": "number" }
+      }
+    }
+  }
+}

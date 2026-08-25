@@ -29,6 +29,24 @@ import {
   GoogleDriveConfig,
   StoreConfig
 } from "./types";
+import { 
+  subscribeToOrders, 
+  subscribeToProducts, 
+  subscribeToCategories, 
+  subscribeToCustomers, 
+  subscribeToStoreConfig,
+  saveOrderToFirestore,
+  deleteOrderFromFirestore,
+  clearAllOrdersFromFirestore,
+  saveProductToFirestore,
+  deleteProductFromFirestore,
+  saveCategoryToFirestore,
+  deleteCategoryFromFirestore,
+  saveCustomerToFirestore,
+  deleteCustomerFromFirestore,
+  saveStoreConfigToFirestore,
+  seedAllToFirestore
+} from "./services/firebaseDb";
 import { PRODUCTS, OFFICIAL_PDF_PRODUCTS } from "./data/products";
 import { POPULAR_CITIES, CityOption } from "./data/cities";
 import { INITIAL_CATEGORIES, OFFICIAL_PDF_CATEGORIES, INITIAL_CUSTOMERS, INITIAL_KANBAN_ORDERS } from "./data/initialData";
@@ -202,6 +220,52 @@ export default function App() {
       localStorage.setItem("papoula_store_config", JSON.stringify(storeConfig));
     } catch (e) {}
   }, [storeConfig]);
+
+  // Real-time Cloud Synchronization with Google Firebase Firestore
+  useEffect(() => {
+    // 1. Subscribe to Orders (syncs all real orders from cloud)
+    const unsubOrders = subscribeToOrders((cloudOrders) => {
+      if (cloudOrders !== undefined) {
+        setKanbanOrders(cloudOrders);
+      }
+    });
+
+    // 2. Subscribe to Products
+    const unsubProducts = subscribeToProducts((cloudProducts) => {
+      if (cloudProducts && cloudProducts.length > 0) {
+        setProducts(cloudProducts);
+      }
+    });
+
+    // 3. Subscribe to Categories
+    const unsubCategories = subscribeToCategories((cloudCategories) => {
+      if (cloudCategories && cloudCategories.length > 0) {
+        setCategories(cloudCategories);
+      }
+    });
+
+    // 4. Subscribe to Customers
+    const unsubCustomers = subscribeToCustomers((cloudCustomers) => {
+      if (cloudCustomers && cloudCustomers.length > 0) {
+        setCustomers(cloudCustomers);
+      }
+    });
+
+    // 5. Subscribe to Store Configuration
+    const unsubConfig = subscribeToStoreConfig((cloudConfig) => {
+      if (cloudConfig) {
+        setStoreConfig(cloudConfig);
+      }
+    });
+
+    return () => {
+      unsubOrders();
+      unsubProducts();
+      unsubCategories();
+      unsubCustomers();
+      unsubConfig();
+    };
+  }, []);
 
   // Automatic Background Synchronization with Google Drive JSON Files (pedidos.json, catalogo.json, categorias.json)
   useEffect(() => {
@@ -409,31 +473,37 @@ export default function App() {
   // Product management handlers
   const handleAddProduct = (newProd: Product) => {
     setProducts((prev) => [newProd, ...prev]);
+    saveProductToFirestore(newProd).catch((e) => console.warn("Firestore product save:", e));
   };
 
   const handleUpdateProduct = (updatedProd: Product) => {
     setProducts((prev) =>
       prev.map((p) => (p.id === updatedProd.id ? updatedProd : p))
     );
+    saveProductToFirestore(updatedProd).catch((e) => console.warn("Firestore product save:", e));
   };
 
   const handleDeleteProduct = (productId: string) => {
     setProducts((prev) => prev.filter((p) => p.id !== productId));
+    deleteProductFromFirestore(productId).catch((e) => console.warn("Firestore product delete:", e));
   };
 
   // Category management handlers
   const handleAddCategory = (newCat: Category) => {
     setCategories((prev) => [...prev, newCat]);
+    saveCategoryToFirestore(newCat).catch((e) => console.warn("Firestore category save:", e));
   };
 
   const handleUpdateCategory = (updatedCat: Category) => {
     setCategories((prev) =>
       prev.map((c) => (c.id === updatedCat.id ? updatedCat : c))
     );
+    saveCategoryToFirestore(updatedCat).catch((e) => console.warn("Firestore category save:", e));
   };
 
   const handleDeleteCategory = (categoryId: string) => {
     setCategories((prev) => prev.filter((c) => c.id !== categoryId));
+    deleteCategoryFromFirestore(categoryId).catch((e) => console.warn("Firestore category delete:", e));
   };
 
   // Customer management handlers
@@ -451,37 +521,43 @@ export default function App() {
       }
       return [newCustomer, ...prev];
     });
+    saveCustomerToFirestore(newCustomer).catch((e) => console.warn("Firestore customer save:", e));
   };
 
   const handleUpdateCustomer = (updatedCustomer: Customer) => {
     setCustomers((prev) =>
       prev.map((c) => (c.id === updatedCustomer.id ? updatedCustomer : c))
     );
+    saveCustomerToFirestore(updatedCustomer).catch((e) => console.warn("Firestore customer save:", e));
   };
 
   const handleDeleteCustomer = (customerId: string) => {
     setCustomers((prev) => prev.filter((c) => c.id !== customerId));
+    deleteCustomerFromFirestore(customerId).catch((e) => console.warn("Firestore customer delete:", e));
   };
 
   // Kanban Order management handlers
   const handleUpdateOrderStatus = (orderId: string, newStatus: KanbanOrderStatus, photoUrl?: string) => {
-    setKanbanOrders((prev) =>
-      prev.map((order) => {
+    setKanbanOrders((prev) => {
+      const updatedList = prev.map((order) => {
         if (order.id === orderId) {
-          return {
+          const updatedOrder: KanbanOrder = {
             ...order,
             status: newStatus,
-            photoUrl: photoUrl || order.photoUrl,
-            completedAt: newStatus === "concluido" ? new Date().toISOString() : order.completedAt,
+            photoProofUrl: photoUrl || order.photoProofUrl,
           };
+          saveOrderToFirestore(updatedOrder).catch((e) => console.warn("Firestore order update:", e));
+          return updatedOrder;
         }
         return order;
-      })
-    );
+      });
+      return updatedList;
+    });
   };
 
   const handleAddKanbanOrder = (newOrder: KanbanOrder) => {
     setKanbanOrders((prev) => [newOrder, ...prev]);
+    saveOrderToFirestore(newOrder).catch((e) => console.warn("Firestore order save:", e));
 
     // Also auto-register customer if not in list
     if (newOrder.customerName && newOrder.customerPhone) {
@@ -501,21 +577,30 @@ export default function App() {
     setKanbanOrders((prev) =>
       prev.map((order) => (order.id === updatedOrder.id ? updatedOrder : order))
     );
+    saveOrderToFirestore(updatedOrder).catch((e) => console.warn("Firestore order save:", e));
   };
 
   const handleBatchImportOrders = (importedOrders: KanbanOrder[]) => {
     setKanbanOrders(importedOrders);
     localStorage.setItem("papoula_kanban_orders", JSON.stringify(importedOrders));
+    seedAllToFirestore({ orders: importedOrders }).catch((e) => console.warn("Firestore batch orders:", e));
   };
 
   const handleDeleteKanbanOrder = (orderId: string) => {
     setKanbanOrders((prev) => prev.filter((order) => order.id !== orderId));
+    deleteOrderFromFirestore(orderId).catch((e) => console.warn("Firestore order delete:", e));
+  };
+
+  const handleUpdateStoreConfigWithCloud = (newConfig: StoreConfig) => {
+    setStoreConfig(newConfig);
+    saveStoreConfigToFirestore(newConfig).catch((e) => console.warn("Firestore store config save:", e));
   };
 
   const handleClearOrders = () => {
-    if (window.confirm("Deseja apagar todos os pedidos do Kanban? Essa ação não pode ser desfeita.")) {
+    if (window.confirm("Deseja apagar todos os pedidos do Kanban e do Banco de Dados? Essa ação não pode ser desfeita.")) {
       setKanbanOrders([]);
       localStorage.setItem("papoula_kanban_orders", JSON.stringify([]));
+      clearAllOrdersFromFirestore().catch((e) => console.warn("Error clearing orders from Firestore:", e));
     }
   };
 
@@ -549,6 +634,7 @@ export default function App() {
       localStorage.setItem("papoula_customers", JSON.stringify([]));
       localStorage.removeItem("papoula_cart");
       localStorage.removeItem("papoula_orders");
+      clearAllOrdersFromFirestore().catch((e) => console.warn("Error clearing orders from Firestore:", e));
     }
   };
 
@@ -588,6 +674,7 @@ export default function App() {
     setCategories(nextCategories);
     localStorage.setItem("papoula_catalog", JSON.stringify(nextProducts));
     localStorage.setItem("papoula_categories", JSON.stringify(nextCategories));
+    seedAllToFirestore({ products: nextProducts, categories: nextCategories }).catch((e) => console.warn("Firestore batch products:", e));
   };
 
   const handleRequestOrder = (
@@ -759,7 +846,7 @@ export default function App() {
         googleDriveConfig={googleDriveConfig}
         onUpdateGoogleDriveConfig={setGoogleDriveConfig}
         storeConfig={storeConfig}
-        onUpdateStoreConfig={setStoreConfig}
+        onUpdateStoreConfig={handleUpdateStoreConfigWithCloud}
         onClearOrders={handleClearOrders}
         onClearCustomers={handleClearCustomers}
         onClearProducts={handleClearCatalog}

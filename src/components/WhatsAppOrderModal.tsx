@@ -15,8 +15,9 @@ import {
   ArrowLeft,
   Info
 } from "lucide-react";
-import { Product, ProductSize, GoogleDriveConfig } from "../types";
+import { Product, ProductSize, GoogleDriveConfig, KanbanOrder } from "../types";
 import { sendOrderToGoogleDrive } from "../utils/googleDriveSync";
+import { saveOrderToFirestore } from "../services/firebaseDb";
 import { openWhatsApp } from "../utils/whatsapp";
 
 interface WhatsAppOrderModalProps {
@@ -142,7 +143,29 @@ ${recipientPhone.trim() ? `• *Telefone Destinatário:* ${recipientPhone.trim()
 💳 *Forma de Pagamento:* PIX
 👉 *Por favor, confirme a disponibilidade, o valor total e me envie a chave PIX para pagamento!* ✨`;
 
-    // Try sending directly to configured Google Apps Script (Drive JSON Webhook)
+    // Save directly and automatically into Google Firebase Cloud Database
+    const newFirestoreOrder: KanbanOrder = {
+      id: `ord_${Date.now()}_${Math.floor(100 + Math.random() * 900)}`,
+      orderNumber: orderNum,
+      customerName: senderType === "anonymous" ? "Envio Anônimo" : (senderName.trim() || "Anônimo"),
+      customerPhone: senderPhone.trim() || "(38) 98851-2855",
+      productName: `${product.name}${sizeInfo}`,
+      category: product.category || "Arranjos",
+      referencePrice: currentPrice,
+      freightFee: deliveryFee,
+      totalPrice: currentPrice + deliveryFee,
+      deliveryCity: deliveryCity,
+      deliveryAddress: fullAddress,
+      deliveryNeighborhood: deliveryNeighborhood.trim(),
+      deliveryDate: deliveryTimeSlot,
+      cardMessage: cardMessage.trim() || "Com todo meu amor e carinho!",
+      paymentMethod: "pix",
+      status: "pedido",
+      createdAt: new Date().toISOString(),
+    };
+    saveOrderToFirestore(newFirestoreOrder).catch((err) => console.warn("Firestore order save:", err));
+
+    // Try sending directly to configured Google Apps Script (Drive JSON Webhook) if configured
     try {
       const storedConfig = localStorage.getItem("papoula_gdrive_config");
       if (storedConfig) {

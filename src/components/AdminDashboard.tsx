@@ -45,7 +45,9 @@ import {
   Instagram,
   Pencil,
   Send,
-  HardDrive
+  HardDrive,
+  Cloud,
+  Zap
 } from "lucide-react";
 import { Product, Category, Customer, KanbanOrder, KanbanOrderStatus, GoogleDriveConfig, StoreConfig } from "../types";
 import { PapoulaLogo } from "./PapoulaLogo";
@@ -870,6 +872,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const [isSyncingFirebase, setIsSyncingFirebase] = useState(false);
+
+  const handleSyncAllToFirestore = async () => {
+    setIsSyncingFirebase(true);
+    try {
+      const { seedAllToFirestore } = await import("../services/firebaseDb");
+      const res = await seedAllToFirestore({
+        orders: kanbanOrders,
+        products,
+        categories,
+        customers,
+        storeConfig,
+      });
+      if (res.success) {
+        showNotification("🟢 " + res.message);
+      } else {
+        showNotification("⚠️ " + res.message);
+      }
+    } catch (e: any) {
+      showNotification("Erro ao sincronizar com Google Firebase: " + e.message);
+    } finally {
+      setIsSyncingFirebase(false);
+    }
+  };
+
   const monthBirthdaysCount = customers.filter((c) => isBirthdayInCurrentMonth(c.birthDate)).length;
   const withBirthdaysCount = customers.filter((c) => !!c.birthDate && c.birthDate.trim() !== "").length;
   const withOrdersCount = customers.filter((c) => (c.totalOrders || 0) > 0).length;
@@ -1095,10 +1122,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 }`}
               >
                 <Database className="w-4 h-4 shrink-0" />
-                <span>Banco Google Drive</span>
-                {googleDriveConfig.autoSync && (
-                  <span className="ml-auto w-2 h-2 rounded-full bg-emerald-400" title="Sincronização Ativa" />
-                )}
+                <span>Banco de Dados</span>
+                <span className="ml-auto w-2 h-2 rounded-full bg-emerald-400 animate-pulse" title="Google Firebase Firestore Conectado" />
               </button>
 
               <button
@@ -2763,396 +2788,203 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               );
             })()}
 
-            {/* TAB 6: BANCO DE DADOS & GOOGLE DRIVE */}
+            {/* TAB: BANCO DE DADOS OFICIAL GOOGLE FIREBASE */}
             {activeMenu === "database" && (
               <div className="space-y-6">
                 <div>
                   <h2 className="text-2xl font-serif font-extrabold text-stone-900 flex items-center gap-2">
                     <Database className="w-6 h-6 text-[#114b30]" />
-                    <span>Banco de Dados & Armazenamento</span>
+                    <span>Banco de Dados em Nuvem (Google Firebase Firestore)</span>
                   </h2>
                   <p className="text-xs sm:text-sm text-stone-500">
-                    Gerencie o armazenamento em arquivos JSON para pedidos e catálogo (independente e seguro) ou conecte com o Google Drive / Planilhas Google.
+                    Todos os pedidos, catálogo de flores, clientes e horários são salvos e sincronizados em tempo real no <strong>Google Firebase Firestore</strong>.
                   </p>
                 </div>
 
-                {/* PROMINENT JSON STORAGE CARDS (Pedidos e Catálogo) */}
+                {/* PROMINENT GOOGLE FIREBASE FIRESTORE CLOUD MASTER CARD */}
                 <div className="bg-gradient-to-br from-emerald-950 via-[#114b30] to-emerald-900 rounded-3xl p-6 sm:p-7 text-white shadow-xl border border-emerald-800/60 space-y-5">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-emerald-700/60 pb-4">
-                    <div className="space-y-1">
-                      <div className="inline-flex items-center gap-2 px-3 py-1 bg-amber-400/20 text-amber-300 rounded-full text-xs font-bold border border-amber-400/30">
-                        <span>📦 Armazenamento em Arquivos JSON</span>
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-emerald-700/60 pb-5">
+                    <div className="space-y-1.5">
+                      <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-400/20 text-emerald-300 rounded-full text-xs font-bold border border-emerald-400/30">
+                        <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                        <span>Google Firebase Firestore Conectado & Operacional</span>
                       </div>
-                      <h3 className="text-lg sm:text-xl font-serif font-bold text-white">
-                        Armazenamento Oficial em Arquivos JSON
+                      <h3 className="text-xl sm:text-2xl font-serif font-bold text-white flex items-center gap-2">
+                        <Cloud className="w-6 h-6 text-amber-400" />
+                        <span>Banco de Dados Próprio do Google</span>
                       </h3>
-                      <p className="text-xs text-emerald-200/90 max-w-2xl leading-relaxed">
-                        Guarde todos os pedidos e o catálogo de produtos em arquivos <code className="bg-black/30 px-1.5 py-0.5 rounded text-amber-300 font-mono">pedidos.json</code> e <code className="bg-black/30 px-1.5 py-0.5 rounded text-amber-300 font-mono">catalogo.json</code>. Baixe backups ou restaure dados a qualquer momento com 1 clique!
+                      <p className="text-xs sm:text-sm text-emerald-100/90 max-w-2xl leading-relaxed">
+                        Sincronização em tempo real: novos pedidos feitos pelos clientes, alterações de preços, fotos e atualizações de entrega são gravados instantaneamente na nuvem do Google.
                       </p>
                     </div>
-                  </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-                    {/* JSON CARD 1: PEDIDOS */}
-                    <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/15 flex flex-col justify-between space-y-4">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-xl bg-amber-400 text-emerald-950 flex items-center justify-center font-bold shadow-xs">
-                              <Package className="w-4 h-4" />
-                            </div>
-                            <span className="font-bold text-sm sm:text-base text-white">
-                              Arquivo de Pedidos (pedidos.json)
-                            </span>
-                          </div>
-                          <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-amber-400 text-emerald-950">
-                            {kanbanOrders.length} {kanbanOrders.length === 1 ? "pedido" : "pedidos"}
-                          </span>
-                        </div>
-                        <p className="text-xs text-emerald-100/80 leading-relaxed">
-                          Salva todos os pedidos da esteira Kanban, dados do remetente, destinatário, endereço, data de entrega, mensagem de cartão e foto de conclusão.
-                        </p>
-                      </div>
-
-                      <div className="space-y-2 pt-2 border-t border-white/10">
-                        <button
-                          type="button"
-                          onClick={handleDownloadOrdersJSON}
-                          className="w-full py-2.5 px-4 bg-amber-400 hover:bg-amber-300 text-emerald-950 font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01]"
-                        >
-                          <Download className="w-4 h-4 text-emerald-950" />
-                          <span>Baixar pedidos.json ({kanbanOrders.length})</span>
-                        </button>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="py-2 px-3 bg-white/15 hover:bg-white/25 text-white border border-white/20 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-center">
-                            <Upload className="w-3.5 h-3.5 text-amber-300" />
-                            <span>Mesclar .json</span>
-                            <input
-                              type="file"
-                              accept=".json,application/json"
-                              onChange={(e) => handleImportOrdersJSONFile(e, false)}
-                              className="hidden"
-                            />
-                          </label>
-
-                          <label className="py-2 px-3 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-400/30 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-center" title="Substitui todos os pedidos atuais pelos do arquivo">
-                            <RotateCcw className="w-3.5 h-3.5 text-rose-300" />
-                            <span>Restaurar .json</span>
-                            <input
-                              type="file"
-                              accept=".json,application/json"
-                              onChange={(e) => {
-                                if (window.confirm("Deseja substituir todos os pedidos atuais pelos dados do arquivo pedidos.json?")) {
-                                  handleImportOrdersJSONFile(e, true);
-                                } else {
-                                  e.target.value = "";
-                                }
-                              }}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* JSON CARD 2: CATÁLOGO DE FLORES & CATEGORIAS */}
-                    <div className="bg-white/10 backdrop-blur-md rounded-2xl p-5 border border-white/15 flex flex-col justify-between space-y-4">
-                      <div className="space-y-2">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <div className="w-8 h-8 rounded-xl bg-emerald-400 text-emerald-950 flex items-center justify-center font-bold shadow-xs">
-                              <Flower2 className="w-4 h-4" />
-                            </div>
-                            <span className="font-bold text-sm sm:text-base text-white">
-                              Arquivo de Catálogo (catalogo.json)
-                            </span>
-                          </div>
-                          <span className="px-2.5 py-1 rounded-full text-xs font-extrabold bg-emerald-400 text-emerald-950">
-                            {products.length} produtos / {categories.length} cat.
-                          </span>
-                        </div>
-                        <p className="text-xs text-emerald-100/80 leading-relaxed">
-                          Armazena o catálogo completo: todos os produtos florais, preços e referências sob consulta, fotos, descrições ricas, tags e categorias.
-                        </p>
-                      </div>
-
-                      <div className="space-y-2 pt-2 border-t border-white/10">
-                        <button
-                          type="button"
-                          onClick={handleDownloadCatalogJSON}
-                          className="w-full py-2.5 px-4 bg-emerald-400 hover:bg-emerald-300 text-emerald-950 font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center justify-center gap-2 hover:scale-[1.01]"
-                        >
-                          <Download className="w-4 h-4 text-emerald-950" />
-                          <span>Baixar catalogo.json ({products.length} itens)</span>
-                        </button>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="py-2 px-3 bg-white/15 hover:bg-white/25 text-white border border-white/20 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-center">
-                            <Upload className="w-3.5 h-3.5 text-amber-300" />
-                            <span>Mesclar .json</span>
-                            <input
-                              type="file"
-                              accept=".json,application/json"
-                              onChange={(e) => handleImportCatalogJSONFile(e, false)}
-                              className="hidden"
-                            />
-                          </label>
-
-                          <label className="py-2 px-3 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-400/30 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer transition-colors text-center" title="Substitui o catálogo atual pelos itens do arquivo">
-                            <RotateCcw className="w-3.5 h-3.5 text-rose-300" />
-                            <span>Restaurar .json</span>
-                            <input
-                              type="file"
-                              accept=".json,application/json"
-                              onChange={(e) => {
-                                if (window.confirm("Deseja substituir o catálogo atual pelo conteúdo do arquivo catalogo.json?")) {
-                                  handleImportCatalogJSONFile(e, true);
-                                } else {
-                                  e.target.value = "";
-                                }
-                              }}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  {/* Left: Quick Export & Status */}
-                  <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4 flex flex-col justify-between">
-                    <div className="space-y-3">
-                      <div className="flex items-center gap-2 text-stone-900 font-bold text-sm">
-                        <HardDrive className="w-5 h-5 text-emerald-800" />
-                        <span>Arquivos JSON no Google Drive</span>
-                      </div>
-                      <p className="text-xs text-stone-500 leading-relaxed">
-                        Todos os dados são armazenados nos arquivos <code>pedidos.json</code>, <code>catalogo.json</code> e <code>categorias.json</code> na pasta compartilhada.
-                      </p>
-
-                      {/* Master Sync All Button */}
+                    <div className="flex flex-col sm:items-end gap-2 shrink-0">
                       <button
                         type="button"
-                        onClick={handleSyncAllToSheets}
-                        disabled={isSyncingAllData}
-                        className="w-full py-3 px-3 bg-gradient-to-r from-emerald-800 to-[#114b30] hover:from-emerald-700 hover:to-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-md transition-all hover:scale-[1.01] disabled:opacity-50"
+                        onClick={handleSyncAllToFirestore}
+                        disabled={isSyncingFirebase}
+                        className="py-3 px-5 bg-amber-400 hover:bg-amber-300 text-emerald-950 rounded-2xl text-xs sm:text-sm font-extrabold flex items-center justify-center gap-2 cursor-pointer shadow-lg hover:scale-105 transition-all disabled:opacity-60"
                       >
-                        <RefreshCw className={`w-4 h-4 text-amber-300 ${isSyncingAllData ? "animate-spin" : ""}`} />
-                        <span>{isSyncingAllData ? "Salvando arquivos JSON no Drive..." : "⚡ Salvar Tudo no Google Drive (.json)"}</span>
+                        <Zap className={`w-4 h-4 text-emerald-950 ${isSyncingFirebase ? "animate-spin" : ""}`} />
+                        <span>{isSyncingFirebase ? "Sincronizando com Firestore..." : "Sincronizar Tudo na Nuvem"}</span>
                       </button>
-
-                      <div className="space-y-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={handleDownloadOrdersJSON}
-                          className="w-full py-2 px-3 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow-2xs transition-colors"
-                        >
-                          <Download className="w-4 h-4 text-emerald-700" />
-                          <span>Baixar pedidos.json ({kanbanOrders.length} pedidos)</span>
-                        </button>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <button
-                            type="button"
-                            onClick={handleDownloadCatalogJSON}
-                            className="py-2 px-2 bg-stone-50 hover:bg-stone-100 text-stone-800 border border-stone-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                            title="Baixar catalogo.json"
-                          >
-                            <Download className="w-3.5 h-3.5 text-amber-700" />
-                            <span>catalogo.json ({products.length})</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={handleDownloadCategoriesJSON}
-                            className="py-2 px-2 bg-stone-50 hover:bg-stone-100 text-stone-800 border border-stone-200 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 cursor-pointer transition-colors"
-                            title="Baixar categorias.json"
-                          >
-                            <Download className="w-3.5 h-3.5 text-blue-700" />
-                            <span>categorias.json ({categories.length})</span>
-                          </button>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={handleDownloadCustomersCSV}
-                          className="w-full py-2 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 border border-stone-300 rounded-xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                        >
-                          <Download className="w-4 h-4 text-stone-600" />
-                          <span>Exportar Clientes CSV ({customers.length})</span>
-                        </button>
-                      </div>
-
-                      {/* Instructions for JSON storage */}
-                      <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-[11px] text-emerald-950 space-y-1.5">
-                        <strong className="block text-emerald-900 font-bold">✨ Estrutura 100% JSON na Nuvem:</strong>
-                        <p className="leading-tight">A pasta do Google Drive armazena diretamente 3 arquivos:</p>
-                        <ul className="list-disc pl-4 space-y-0.5 text-[10px]">
-                          <li><strong>pedidos.json:</strong> Todos os pedidos recebidos e histórico</li>
-                          <li><strong>catalogo.json:</strong> Produtos, fotos, preços e estoque</li>
-                          <li><strong>categorias.json:</strong> Categorias com ícones e status</li>
-                        </ul>
-                      </div>
-                    </div>
-
-                    <div className="p-3 bg-stone-50 rounded-xl border border-stone-200 text-[11px] text-stone-600 space-y-1">
-                      <span className="font-bold text-stone-800 block">Status da Sincronização:</span>
-                      <p>Última sincronização: <strong>{googleDriveConfig.lastSyncedAt || "Nenhuma ainda"}</strong></p>
-                      <p>Modo Automático: <strong className={googleDriveConfig.autoSync ? "text-emerald-700" : "text-stone-500"}>{googleDriveConfig.autoSync ? "Ativo (Lê arquivos ao abrir)" : "Manual"}</strong></p>
+                      <span className="text-[11px] text-emerald-300/80">ID: <code>ai-studio-floriculturapapo</code></span>
                     </div>
                   </div>
 
-                  {/* Right: Webhook / Google Drive Config Form */}
-                  <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4">
-                    <div className="flex items-center justify-between border-b border-stone-100 pb-3">
-                      <h3 className="font-serif font-bold text-stone-900 text-base flex items-center gap-2">
-                        <Database className="w-5 h-5 text-[#114b30]" />
-                        <span>Configurar Conexão com Google Drive (Arquivos JSON)</span>
-                      </h3>
-                      <button
-                        onClick={() => setIsDriveModalOpen(true)}
-                        className="text-xs text-emerald-800 hover:underline font-bold cursor-pointer"
-                      >
-                        Abrir Guia & Código do Script ↗
-                      </button>
+                  {/* Cloud Realtime Summary Badges */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-3.5 border border-white/15 text-center">
+                      <span className="text-[11px] text-emerald-200 uppercase font-semibold block">Pedidos no Firestore</span>
+                      <span className="text-xl sm:text-2xl font-extrabold text-amber-300">{kanbanOrders.length}</span>
                     </div>
-
-                    <form onSubmit={handleSaveGoogleDriveSettings} className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
-                          URL do Web App do Google Apps Script (Drive JSON) *
-                        </label>
-                        <input
-                          type="url"
-                          value={sheetWebhookUrl}
-                          onChange={(e) => setSheetWebhookUrl(e.target.value)}
-                          placeholder="https://script.google.com/macros/s/.../exec"
-                          className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs font-mono focus:outline-none focus:ring-2 focus:ring-emerald-600/30"
-                        />
-                        <span className="text-[10px] text-stone-500 block mt-1">
-                          Cole a URL gerada na implantação do script para gravar e ler pedidos.json, catalogo.json e categorias.json.
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
-                            Link da Pasta do Google Drive (Opcional)
-                          </label>
-                          <input
-                            type="url"
-                            value={folderUrl}
-                            onChange={(e) => setFolderUrl(e.target.value)}
-                            placeholder="https://drive.google.com/drive/folders/..."
-                            className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-xs font-bold text-stone-700 uppercase tracking-wider mb-1">
-                            ID da Pasta no Google Drive (Opcional)
-                          </label>
-                          <input
-                            type="text"
-                            value={spreadsheetId}
-                            onChange={(e) => setSpreadsheetId(e.target.value)}
-                            placeholder="Ex: 1BxiMVs0XRA5nFMdKvBdBZjgm..."
-                            className="w-full px-3.5 py-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs font-mono"
-                          />
-                        </div>
-                      </div>
-
-                      <div className="bg-emerald-50/70 p-3.5 rounded-xl border border-emerald-200/80 space-y-1.5">
-                        <label className="flex items-center gap-2.5 cursor-pointer text-xs font-bold text-emerald-950">
-                          <input
-                            type="checkbox"
-                            checked={autoSync}
-                            onChange={(e) => setAutoSync(e.target.checked)}
-                            className="w-4 h-4 text-emerald-800 rounded border-stone-300 focus:ring-emerald-500 cursor-pointer"
-                          />
-                          <span>Sincronização Automática: Ler arquivos JSON ao abrir o app e a cada 2 min</span>
-                        </label>
-                        <p className="text-[11px] text-emerald-800 pl-6.5">
-                          Lê automaticamente os pedidos e produtos atualizados na sua pasta do Google Drive sempre que você abrir o app.
-                        </p>
-                      </div>
-
-                      <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-                        <button
-                          type="button"
-                          onClick={async () => {
-                            if (!sheetWebhookUrl.trim()) {
-                              alert("Cole primeiro a URL do Web App do Google Apps Script acima.");
-                              return;
-                            }
-                            const ok = await sendOrderToGoogleDrive(sheetWebhookUrl.trim(), {
-                              orderNumber: "#TESTE-" + Math.floor(100 + Math.random() * 900),
-                              productName: "Buquê Teste Floricultura Papoula",
-                              price: 150,
-                              deliveryFee: 10,
-                              total: 160,
-                              senderName: "Teste Automático",
-                              senderPhone: "(38) 99999-0000",
-                              recipientName: "Cliente Teste",
-                              recipientPhone: "(38) 98888-0000",
-                              city: "Pirapora",
-                              address: "Av. Salmeron, 100",
-                              neighborhood: "Centro",
-                              timeSlot: "Manhã",
-                              cardMessage: "Teste de sincronização JSON com Google Drive realizado com sucesso!",
-                              paymentMethod: "PIX"
-                            });
-                            showNotification(ok ? "✅ Pedido teste salvo em pedidos.json na sua pasta do Google Drive!" : "⚠️ Verifique o link do Webhook do Google Apps Script.");
-                          }}
-                          className="px-4 py-2.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-950 border border-emerald-300 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2"
-                        >
-                          <Send className="w-4 h-4 text-emerald-700" />
-                          <span>🚀 Enviar Pedido Teste para pedidos.json</span>
-                        </button>
-
-                        <button
-                          type="submit"
-                          className="px-6 py-2.5 bg-[#114b30] hover:bg-[#0c3924] text-white font-bold text-xs sm:text-sm rounded-xl shadow-md transition-all cursor-pointer flex items-center gap-2"
-                        >
-                          <Save className="w-4 h-4" />
-                          <span>Salvar Configuração do Google Drive</span>
-                        </button>
-                      </div>
-                    </form>
+                    <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-3.5 border border-white/15 text-center">
+                      <span className="text-[11px] text-emerald-200 uppercase font-semibold block">Flores no Catálogo</span>
+                      <span className="text-xl sm:text-2xl font-extrabold text-emerald-300">{products.length}</span>
+                    </div>
+                    <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-3.5 border border-white/15 text-center">
+                      <span className="text-[11px] text-emerald-200 uppercase font-semibold block">Categorias Ativas</span>
+                      <span className="text-xl sm:text-2xl font-extrabold text-emerald-300">{categories.length}</span>
+                    </div>
+                    <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-3.5 border border-white/15 text-center">
+                      <span className="text-[11px] text-emerald-200 uppercase font-semibold block">Clientes na Nuvem</span>
+                      <span className="text-xl sm:text-2xl font-extrabold text-amber-300">{customers.length}</span>
+                    </div>
                   </div>
                 </div>
 
-                {/* Bottom: Data Maintenance & Cleanup Controls */}
-                <div className="bg-white p-6 rounded-2xl border border-stone-200 shadow-xs space-y-4">
+                {/* BACKUPS & EXPORTAÇÃO JSON / CSV */}
+                <div className="bg-white rounded-3xl p-6 sm:p-7 text-stone-800 shadow-md border border-stone-200 space-y-5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-200 pb-4">
+                    <div className="space-y-1">
+                      <div className="inline-flex items-center gap-2 px-3 py-1 bg-stone-100 text-stone-700 rounded-full text-xs font-bold border border-stone-200">
+                        <span>💾 Backups & Exportações de Segurança</span>
+                      </div>
+                      <h3 className="text-lg sm:text-xl font-serif font-bold text-stone-900">
+                        Cópias de Segurança e Exportações
+                      </h3>
+                      <p className="text-xs text-stone-500 max-w-2xl leading-relaxed">
+                        Baixe arquivos de backup a qualquer momento para manter cópias no seu computador ou restaurar dados se necessário.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    {/* DOWNLOAD ORDERS JSON */}
+                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Package className="w-4 h-4 text-amber-600" />
+                          <span className="font-bold text-xs sm:text-sm text-stone-900">Pedidos (.json)</span>
+                        </div>
+                        <p className="text-[11px] text-stone-500">
+                          {kanbanOrders.length} {kanbanOrders.length === 1 ? "pedido registrado" : "pedidos registrados"}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDownloadOrdersJSON}
+                        className="w-full py-2.5 px-3 bg-amber-400 hover:bg-amber-300 text-emerald-950 font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Baixar pedidos.json</span>
+                      </button>
+                    </div>
+
+                    {/* DOWNLOAD CATALOG JSON */}
+                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Flower2 className="w-4 h-4 text-emerald-700" />
+                          <span className="font-bold text-xs sm:text-sm text-stone-900">Catálogo (.json)</span>
+                        </div>
+                        <p className="text-[11px] text-stone-500">
+                          {products.length} flores com fotos e preços
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDownloadCatalogJSON}
+                        className="w-full py-2.5 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Baixar catalogo.json</span>
+                      </button>
+                    </div>
+
+                    {/* DOWNLOAD CATEGORIES JSON */}
+                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <FolderTree className="w-4 h-4 text-blue-700" />
+                          <span className="font-bold text-xs sm:text-sm text-stone-900">Categorias (.json)</span>
+                        </div>
+                        <p className="text-[11px] text-stone-500">
+                          {categories.length} categorias cadastradas
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDownloadCategoriesJSON}
+                        className="w-full py-2.5 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs border border-stone-300 rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Baixar categorias.json</span>
+                      </button>
+                    </div>
+
+                    {/* DOWNLOAD CUSTOMERS CSV */}
+                    <div className="bg-stone-50 rounded-2xl p-4 border border-stone-200 flex flex-col justify-between space-y-3">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <Users className="w-4 h-4 text-purple-700" />
+                          <span className="font-bold text-xs sm:text-sm text-stone-900">Clientes (.csv)</span>
+                        </div>
+                        <p className="text-[11px] text-stone-500">
+                          {customers.length} contatos com telefones
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleDownloadCustomersCSV}
+                        className="w-full py-2.5 px-3 bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs border border-stone-300 rounded-xl shadow-xs transition-all cursor-pointer flex items-center justify-center gap-1.5"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        <span>Exportar Clientes CSV</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* MANUTENÇÃO & LIMPEZA DE DADOS PARA USO REAL */}
+                <div className="bg-white p-6 sm:p-7 rounded-3xl border border-stone-200 shadow-md space-y-4">
                   <div className="border-b border-stone-100 pb-3 flex items-center justify-between">
                     <div>
-                      <h3 className="font-serif font-bold text-stone-900 text-base flex items-center gap-2">
+                      <h3 className="font-serif font-bold text-stone-900 text-lg flex items-center gap-2">
                         <Trash2 className="w-5 h-5 text-rose-600" />
-                        <span>Manutenção & Limpeza de Dados</span>
+                        <span>Manutenção & Preparação para Uso Real</span>
                       </h3>
                       <p className="text-xs text-stone-500">
-                        Ferramentas para zerar pedidos de teste, limpar clientes ou restaurar os 28 produtos oficiais do PDF.
+                        Ferramentas para zerar pedidos de teste antes de abrir para o público ou restaurar o catálogo oficial.
                       </p>
                     </div>
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-1">
-                    <div className="p-4 bg-stone-50 rounded-xl border border-stone-200 flex flex-col justify-between space-y-3">
+                    {/* LIMPAR PEDIDOS */}
+                    <div className="p-4 bg-rose-50/50 rounded-2xl border border-rose-200 flex flex-col justify-between space-y-3">
                       <div>
-                        <span className="font-bold text-xs text-stone-900 block">Zerar Pedidos do Kanban</span>
-                        <p className="text-[11px] text-stone-500 mt-0.5">
-                          Apaga todos os {kanbanOrders.length} pedidos da esteira para reiniciar do zero.
+                        <span className="font-bold text-xs text-rose-950 block">Zerar Pedidos de Teste</span>
+                        <p className="text-[11px] text-rose-800/80 mt-0.5">
+                          Apaga todos os {kanbanOrders.length} pedidos do Kanban e do Firestore para começar as vendas do zero.
                         </p>
                       </div>
                       <button
                         onClick={onClearOrders || (() => {})}
                         disabled={kanbanOrders.length === 0}
-                        className={`w-full py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                        className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                           kanbanOrders.length > 0
-                            ? "bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200"
+                            ? "bg-rose-600 hover:bg-rose-700 text-white shadow-xs"
                             : "bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed"
                         }`}
                       >
@@ -3161,7 +2993,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </button>
                     </div>
 
-                    <div className="p-4 bg-stone-50 rounded-xl border border-stone-200 flex flex-col justify-between space-y-3">
+                    {/* LIMPAR CLIENTES */}
+                    <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 flex flex-col justify-between space-y-3">
                       <div>
                         <span className="font-bold text-xs text-stone-900 block">Zerar Lista de Clientes</span>
                         <p className="text-[11px] text-stone-500 mt-0.5">
@@ -3171,9 +3004,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <button
                         onClick={onClearCustomers || (() => {})}
                         disabled={customers.length === 0}
-                        className={`w-full py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                        className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                           customers.length > 0
-                            ? "bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200"
+                            ? "bg-stone-200 hover:bg-stone-300 text-stone-800 border border-stone-300"
                             : "bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed"
                         }`}
                       >
@@ -3182,11 +3015,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </button>
                     </div>
 
-                    <div className="p-4 bg-stone-50 rounded-xl border border-stone-200 flex flex-col justify-between space-y-3">
+                    {/* ZERAR CATÁLOGO */}
+                    <div className="p-4 bg-stone-50 rounded-2xl border border-stone-200 flex flex-col justify-between space-y-3">
                       <div>
-                        <span className="font-bold text-xs text-stone-900 block">Limpar Catálogo & Categorias</span>
+                        <span className="font-bold text-xs text-stone-900 block">Zerar Catálogo & Categorias</span>
                         <p className="text-[11px] text-stone-500 mt-0.5">
-                          Zera todos os produtos ({products.length}) e categorias ({categories.length}) para você cadastrar tudo pessoalmente.
+                          Zera todos os produtos ({products.length}) e categorias ({categories.length}) para cadastrar do zero.
                         </p>
                       </div>
                       <button
@@ -3195,9 +3029,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           if (onClearCategories) onClearCategories();
                         }}
                         disabled={products.length === 0 && categories.length === 0}
-                        className={`w-full py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                        className={`w-full py-2.5 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
                           products.length > 0 || categories.length > 0
-                            ? "bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200"
+                            ? "bg-stone-200 hover:bg-stone-300 text-stone-800 border border-stone-300"
                             : "bg-stone-100 text-stone-400 border border-stone-200 cursor-not-allowed"
                         }`}
                       >
@@ -3206,16 +3040,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </button>
                     </div>
 
-                    <div className="p-4 bg-emerald-50/60 rounded-xl border border-emerald-200 flex flex-col justify-between space-y-3">
+                    {/* RESTAURAR PDF */}
+                    <div className="p-4 bg-emerald-50/60 rounded-2xl border border-emerald-200 flex flex-col justify-between space-y-3">
                       <div>
                         <span className="font-bold text-xs text-emerald-950 block">Restaurar Catálogo Oficial (PDF)</span>
                         <p className="text-[11px] text-emerald-800/80 mt-0.5">
-                          Recarrega os 28 produtos e categorias originais da Floricultura Papoula se desejar.
+                          Recarrega os 28 produtos e categorias oficiais da Floricultura Papoula.
                         </p>
                       </div>
                       <button
                         onClick={onResetToDefaults}
-                        className="w-full py-2 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-lg text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+                        className="w-full py-2.5 px-3 bg-[#114b30] hover:bg-[#0c3924] text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
                       >
                         <RotateCcw className="w-3.5 h-3.5" />
                         <span>Carregar 28 Itens do PDF</span>
