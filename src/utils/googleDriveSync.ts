@@ -874,20 +874,36 @@ export const GOOGLE_APPS_SCRIPT_DRIVE_JSON_CODE = `/**
  * 11. Clique em "Implantar" e copie a URL gerada (/exec) para colar no Painel Administrativo.
  */
 
-// Se tiver o ID de uma pasta específica no Google Drive, cole aqui (ex: "1aBcDeFg_hIjKlMnOpQrStUvWxYz").
-// Se deixar vazio, o script cria/encontra a pasta "Floricultura Papoula - Dados" automaticamente!
+// Se você tiver o link ou o ID da sua pasta compartilhada do Google Drive, cole abaixo:
+// Exemplo: "https://drive.google.com/drive/folders/1aBcDeFg_hIjKlMnOpQrStUvWxYz" ou apenas "1aBcDeFg_hIjKlMnOpQrStUvWxYz"
 var FOLDER_ID = "";
 var FOLDER_NAME = "Floricultura Papoula - Dados";
 
 /**
- * Localiza ou cria a pasta do Google Drive
+ * Extrai o ID da pasta a partir de um ID direto ou de um link completo do Google Drive
  */
-function getStorageFolder() {
-  if (FOLDER_ID && FOLDER_ID.trim() !== "") {
+function extractFolderId(input) {
+  if (!input || typeof input !== "string") return "";
+  var str = input.trim();
+  var match = str.match(/folders\/([a-zA-Z0-9_-]+)/i);
+  if (match && match[1]) return match[1];
+  var idMatch = str.match(/id=([a-zA-Z0-9_-]+)/i);
+  if (idMatch && idMatch[1]) return idMatch[1];
+  if (!str.includes("/") && str.length > 10) return str;
+  return "";
+}
+
+/**
+ * Localiza ou cria a pasta do Google Drive onde os arquivos .json serão gravados
+ */
+function getStorageFolder(customParam) {
+  var targetId = extractFolderId(customParam) || extractFolderId(FOLDER_ID);
+  
+  if (targetId) {
     try {
-      return DriveApp.getFolderById(FOLDER_ID.trim());
+      return DriveApp.getFolderById(targetId);
     } catch (e) {
-      Logger.log("Aviso: Nao foi possivel abrir pelo FOLDER_ID, buscando por nome...");
+      Logger.log("Aviso: Nao foi possivel abrir pelo ID " + targetId + ": " + e.toString());
     }
   }
 
@@ -896,9 +912,9 @@ function getStorageFolder() {
     return folders.next();
   }
 
-  // Cria a pasta automaticamente
+  // Cria a pasta automaticamente caso nao exista
   var newFolder = DriveApp.createFolder(FOLDER_NAME);
-  Logger.log("Pasta criada no Google Drive: " + newFolder.getName() + " (ID: " + newFolder.getId() + ")");
+  Logger.log("Pasta criada automaticamente no seu Google Drive: " + newFolder.getName() + " (ID: " + newFolder.getId() + ")");
   return newFolder;
 }
 
@@ -969,7 +985,8 @@ function testarIntegracaoDriveJSON() {
  */
 function doGet(e) {
   try {
-    var folder = getStorageFolder();
+    var customParam = (e && e.parameter) ? (e.parameter.folderId || e.parameter.folderUrl || e.parameter.folder) : "";
+    var folder = getStorageFolder(customParam);
     
     var rawOrders = readJSONFile(folder, "pedidos.json", []);
     var rawCatalog = readJSONFile(folder, "catalogo.json", []);
@@ -1020,7 +1037,8 @@ function doPost(e) {
       }
     }
 
-    var folder = getStorageFolder();
+    var customParam = (data.folderId || data.folderUrl || (e && e.parameter && (e.parameter.folderId || e.parameter.folderUrl)));
+    var folder = getStorageFolder(customParam);
 
     // 1. Ação: Obter dados (getData)
     if (data.action === "getData" || data.action === "getOrders") {
